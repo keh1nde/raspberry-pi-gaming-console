@@ -1,6 +1,6 @@
 /**
  * @file interrupts.cpp
- * @brief Synchronous-exception decoder and IRQ controller bring-up.
+ * @brief Synchronous-exception decoder and GIC-400 IRQ controller bring-up.
  *
  * Part of raspberry-pi-gaming-console, a retro gaming console OS.
  * Built on the kehinde-kernel project, originally MIT-licensed.
@@ -8,13 +8,12 @@
  * The vector table in `vector_table.S` calls into the two `extern "C"`
  * entry points defined here. Synchronous exceptions are treated as fatal
  * diagnostics: decode ESR_EL1 (EC, ISS, DFSC), dump FAR_EL1 / ELR_EL1,
- * and halt. IRQs currently service the per-core ARM Generic Timer only;
- * UART RX is wired on the device side but masked at the IRQ controller
- * to avoid a storm (see CLAUDE.md known issues).
+ * and halt. IRQs currently service the per-core ARM Generic Timer only
+ * (GIC-400 PPI 30); UART RX interrupt is deferred pending SPI ID lookup.
  *
  * References:
  *   - Arm Architecture Reference Manual for A-profile, §D1 (Exception model)
- *   - BCM2835 ARM Peripherals, §7 (Interrupts)
+ *   - ARM Generic Interrupt Controller Architecture Specification, GICv2 (IHI0048B)
  *
  * @author Kehinde Adeoso
  * @copyright 2026 Kehinde Adeoso. SPDX-License-Identifier: GPL-3.0-only
@@ -40,35 +39,20 @@
 
 #include "uart.h"
 #include "timer.h"
+#include "board.h"
 
-/** Peripheral and IRQ-controller register addresses. */
-enum {
-	TIMER_BASE = 0x3F003000,
+/** GIC-400 and peripheral register addresses. */
+enum : uint64_t {
+	TIMER_BASE = 0x400ac000,
 
-	TIMER_CS = (TIMER_BASE + 0x0),
-	TIMER_CLO = (TIMER_BASE + 0x4),
-	TIMER_CHI = (TIMER_BASE + 0x8),
+	GICD_CTLR        = GICD_BASE + 0x000,
+	GICD_ISENABLER0  = GICD_BASE + 0x100,
+	GICD_IPRIORITYR7 = GICD_BASE + 0x41C,
 
-	TIMER_C0 = (TIMER_BASE + 0xC),
-	TIMER_C1 = (TIMER_BASE + 0x10),
-	TIMER_C2 = (TIMER_BASE + 0x14),
-	TIMER_C3 = (TIMER_BASE + 0x18),
-
-	IRQ_BASE = 0x3F00B000,
-	IRQ_BASIC = (IRQ_BASE + 0x200),
-	IRQ_P1 = (IRQ_BASE + 0x204),
-	IRQ_P2 = (IRQ_BASE + 0x208),
-	IRQ_FC = (IRQ_BASE + 0x20C), // The IRQ pending register
-	IRQ_EN1 = (IRQ_BASE + 0x210),
-	IRQ_EN2 = (IRQ_BASE + 0x214),
-	IRQ_BEN = (IRQ_BASE + 0x218),
-	IRQ_1DS = (IRQ_BASE + 0x21C),
-	IRQ_2DS = (IRQ_BASE + 0x220),
-	IRQ_BDS = (IRQ_BASE + 0x224),
-
-	IRQ_ARM_BASE = 0x40000000,
-	IRQ_EN_C0 = 0x40000040,
-	IRQ_C0_SOURCE = 0x40000060,
+	GICC_CTLR = GICC_BASE + 0x000,
+	GICC_PMR  = GICC_BASE + 0x004,
+	GICC_IAR  = GICC_BASE + 0x00C,
+	GICC_EOIR = GICC_BASE + 0x010,
 };
 
 extern "C" void handle_synchronous_interrupts() {
@@ -132,23 +116,28 @@ extern "C" void handle_synchronous_interrupts() {
 }
 
 extern "C" void interrupt_init() {
-	// Mask every peripheral IRQ at the BCM2835 controller before enabling
-	// the specific lines the kernel wants. Cleaner than relying on reset
-	// state and avoids spurious IRQs during bring-up.
-	mmio_write(IRQ_1DS, 0xFFFFFFFF);
-	mmio_write(IRQ_2DS, 0xFFFFFFFF);
-	mmio_write(IRQ_BDS, 0xFFFFFFFF);
+	// Disable all interrupts by writing 0 to bits 0 and 1
+	mmio_write(GICD_CTLR, 0);
 
-	// Enable ARM Timer (basic IRQ 0) on the BCM2835 side. UART RX (IRQ_EN2
-	// bit 25) is intentionally left masked — see CLAUDE.md known issues.
-	mmio_write(IRQ_BEN, 1 << 0);
-	mmio_write(IRQ_EN_C0, (1 << 1)); // Per-core timer source on the ARM local block.
+	// Personal Note:
+	// GICD_IPRIORITY7 controls priority for interrupt IDs 28-31
+	// Implement logic for setting and handling this register once
+	// the need arises. For now, the register will remain unset.
 
-	// Enable UART interrupts
-	mmio_write(IRQ_EN2, (1 << 25));
+	// Enable the physical timer
+	mmio_write(GICD_ISENABLER0, mmio_read(GICD_ISENABLER0) | (1 << 30));
+
+	// Re-enable distributor
+	mmio_write(GICD_CTLR, 1);
+
+	// Pass all priorities to CPU
+	mmio_write(GICC_PMR, 0xFF);
+
+	// Enable the CPU interface
+	mmio_write(GICC_CTLR, 1);
 }
 
-extern "C" void handle_interrupt_requests() {
+/*extern "C" void handle_interrupt_requests() {
 	uint64_t irq_pend_status;
 	irq_pend_status = mmio_read(IRQ_C0_SOURCE);
 
@@ -171,4 +160,17 @@ extern "C" void handle_interrupt_requests() {
 
 		// print_time();
 	}
+}*/
+
+extern "C" void handle_interrupt_requests() {
+	uint64_t iar = mmio_read(GICC_IAR);
+	uint64_t int_id = iar & 0x3FF;
+
+	if (int_id == 30) {
+		uint64_t freq = get_freq();
+		asm volatile("msr CNTP_TVAL_EL0, %0" :: "r"(freq / 10));
+		increment_time();
+	}
+
+	mmio_write(GICC_EOIR, iar);
 }

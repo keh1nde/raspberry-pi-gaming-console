@@ -29,28 +29,10 @@
 .extern vector_table
 
 _start:
-    #ifdef BOARD_PI3b
-        b start_pi3b
-    #elif defined(BOARD_PI5)
-        b start_pi5
-    #endif
-
-start_pi3b:
-    // Read the CPU ID from MPIDR_EL1; only core 0 should continue.
-    mrs     x1, mpidr_el1
-    and     x1, x1, #3
-    cmp     x1, #0
-    bne     halt
-
-    b level_init
-
-start_pi5:
-    // Note that the Pi 3b core deactivation process
-    // is a no-op on the Pi 5, as this process is handled
-    // automatically by it's Power State Coordination Interface (PSCI).
-
-    // When multicore operation has been implemented the other three
-    // cores in the Pi 5 will be activated here.
+    // On the Pi 5, secondary-core parking is handled by the Power State
+    // Coordination Interface (PSCI), so the Pi 3-style MPIDR core check is
+    // unnecessary. When multicore support lands, the other three cores will
+    // be activated here.
 
     b level_init
 

@@ -1,13 +1,13 @@
 /**
  * @file board.h
- * @brief Board-specific MMIO base addresses and CPU identifiers, selected at compile time.
+ * @brief MMIO base addresses and register definitions for the Raspberry Pi 5.
  *
  * Part of raspberry-pi-gaming-console, a retro gaming console OS.
  * Built on the kehinde-kernel project, originally MIT-licensed.
  *
- * Board-specific constants (MMIO base addresses, CPU identifiers)
- * selected at compile time via BOARD_PI3 or BOARD_PI5 preprocessor define.
- * Add a new #elif here when porting to a new target.
+ * Constants for the BCM2712 SoC and RP1 south bridge: the PCIe-windowed
+ * peripheral base, GIC-400 distributor/CPU interface, RP1 UART, GPIO, and
+ * UART clocks.
  *
  * Note: GIC-400 variables have docustrings to eliminate the need to
  * revisit ARM documentation. All variables will recieve documentation at
@@ -19,75 +19,8 @@
 
 #pragma once
 
-#ifdef BOARD_PI3b
-	constexpr uint64_t PERIPHERAL_BASE = 0x3F000000; // For Broadcom devices
-	constexpr uint64_t LOCAL_PERIPHERAL_BASE = 0x40000000; // For ARM devices
+#include <stdint.h>
 
-	/** First physical address claimed by Raspberry Pi MMIO peripherals. The PMM
-	*  manages frames up to but not including this address. */
-	constexpr uint64_t PHYS_MEM_END = 0x3F800000;
-
-	// The following are Timer, IRQ and UART MMIO addresses for the Pi 3b.
-	enum {
-		// Timer Addresses
-		TIMER_BASE = (PERIPHERAL_BASE + 0x00003000),
-
-		TIMER_CS = (TIMER_BASE + 0x0),
-		TIMER_CLO = (TIMER_BASE + 0x4),
-		TIMER_CHI = (TIMER_BASE + 0x8),
-
-		TIMER_C0 = (TIMER_BASE + 0xC),
-		TIMER_C1 = (TIMER_BASE + 0x10),
-		TIMER_C2 = (TIMER_BASE + 0x14),
-		TIMER_C3 = (TIMER_BASE + 0x18),
-
-		// IRQ Addresses
-		IRQ_BASE = (PERIPHERAL_BASE + 0x0000B000),
-		IRQ_BASIC = (IRQ_BASE + 0x200),
-		IRQ_P1 = (IRQ_BASE + 0x204),
-		IRQ_P2 = (IRQ_BASE + 0x208),
-		IRQ_FC = (IRQ_BASE + 0x20C), // The IRQ pending register
-		IRQ_EN1 = (IRQ_BASE + 0x210),
-		IRQ_EN2 = (IRQ_BASE + 0x214),
-		IRQ_BEN = (IRQ_BASE + 0x218),
-		IRQ_1DS = (IRQ_BASE + 0x21C),
-		IRQ_2DS = (IRQ_BASE + 0x220),
-		IRQ_BDS = (IRQ_BASE + 0x224),
-
-		// ARM Local Addresses
-		IRQ_ARM_BASE = LOCAL_PERIPHERAL_BASE,
-		IRQ_EN_C0 = 0x40000040,
-		IRQ_C0_SOURCE = 0x40000060,
-
-		// UART Addresses
-		GPIO_BASE = 0x3F200000,
-
-		GPPUD = (GPIO_BASE + 0x94),
-		GPPUDCLK0 = (GPIO_BASE + 0x98),
-
-		UART0_BASE = 0x3F201000, // raspi2 & 3; 0x20201000 on raspi1.
-
-		UART0_DR     = (UART0_BASE + 0x00),
-		UART0_RSRECR = (UART0_BASE + 0x04),
-		UART0_FR     = (UART0_BASE + 0x18),
-		UART0_ILPR   = (UART0_BASE + 0x20),
-		UART0_IBRD   = (UART0_BASE + 0x24),
-		UART0_FBRD   = (UART0_BASE + 0x28),
-		UART0_LCRH   = (UART0_BASE + 0x2C),
-		UART0_CR     = (UART0_BASE + 0x30),
-		UART0_IFLS   = (UART0_BASE + 0x34),
-		UART0_IMSC   = (UART0_BASE + 0x38),
-		UART0_RIS    = (UART0_BASE + 0x3C),
-		UART0_MIS    = (UART0_BASE + 0x40),
-		UART0_ICR    = (UART0_BASE + 0x44),
-		UART0_DMACR  = (UART0_BASE + 0x48),
-		UART0_ITCR   = (UART0_BASE + 0x80),
-		UART0_ITIP   = (UART0_BASE + 0x84),
-		UART0_ITOP   = (UART0_BASE + 0x88),
-		UART0_TDR    = (UART0_BASE + 0x8C),
-	};
-
-#elif defined(BOARD_PI5)
 	/**
 	 * RP1 PCIe BAR0 as seen from the AP (Application Processor).
 	 *
@@ -314,8 +247,5 @@
 	constexpr uint64_t ATOMIC_CLEAR     = 0x4000;
 
 
-#else
-	#error "No board defined. Pass -DBOARD_PI3 or -DBOARD_PI5."
-#endif
 
 

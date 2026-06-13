@@ -23,32 +23,34 @@
 #include "uart.h"
 #include "board.h"
 
-/** PL011 UART and GPIO register addresses are available in board.h*/
+// UART MMIO addresses are available in board.h
 
-void uart_init()
-{
+void uart_init(){
 	// Disable the UART before reconfiguring.
 	mmio_write(UART0_CR, 0x00000000);
 
-	// Disable pull-up/down on GPIO 14/15 (UART TX/RX), per the BCM2835
-	// GPIO pull-state programming sequence (write GPPUD, delay, latch via
-	// GPPUDCLK0, delay, clear GPPUDCLK0).
-	mmio_write(GPPUD, 0x00000000);
-	delay(150);
+	// Set up the clock
+	mmio_write(CLK_UART_DIV_INT, 1);
+	mmio_write(CLK_UART_CTRL, (2 << 5) | (1 << 11) | (1 << 0));
 
-	mmio_write(GPPUDCLK0, (1 << 14) | (1 << 15));
-	delay(150);
+	// Set FUNCSEL field to a4 to mux GPIO14 to UART0_TX and GPIO15 to UART0_RX
+	mmio_write(GPIO14_CTRL, 4);
+	mmio_write(GPIO15_CTRL, 4);
 
-	mmio_write(GPPUDCLK0, 0x00000000);
+	// Enable Schmitt Trigger and set drive strength to 0x12
+	mmio_write(GPIO14_PAD, 0x12);
+
+	// Enable Schmitt Trigger, set drive strength to 0x12, enable input and disable output.
+	mmio_write(GPIO15_PAD, 0xD2);
 
 	// Clear all pending UART interrupts.
 	mmio_write(UART0_ICR, 0x7FF);
 
-	// Baud divisors for 115200 baud assuming a 3 MHz UART clock under QEMU
-	// (IBRD=1, FBRD=40). Real hardware programs different divisors via
-	// firmware; values stable for development under QEMU.
-	mmio_write(UART0_IBRD, 1);
-	mmio_write(UART0_FBRD, 40);
+	// Baud divisors for 115200 baud at 50 MHz (xosc)
+	// BRD = 50,000,000 / (16 * 115,200) = 27.127
+	// IBRD = 27, FBRD = round(0.127 * 64) = 8
+	mmio_write(UART0_IBRD, 27);
+	mmio_write(UART0_FBRD, 8);
 
 	// LCRH: FIFOs enabled (FEN), 8-bit word length (WLEN=3).
 	mmio_write(UART0_LCRH, (1 << 4) | (1 << 5) | (1 << 6));
@@ -57,7 +59,7 @@ void uart_init()
 	// UART RX IRQ (bit 4) is intentionally enabled but the IRQ controller
 	// side (IRQ_EN2 bit 25) is currently disabled to avoid an IRQ storm —
 	// see CLAUDE.md / known issues.
-	mmio_write(UART0_IMSC, (1 << 4) | (1 << 6) |
+	mmio_write(UART0_IMSC, (1 << 1) | (1 << 4) | (1 << 5) | (1 << 6) |
 						(1 << 7) | (1 << 8) | (1 << 9) | (1 << 10));
 
 	// Re-enable the UART with TX and RX.
@@ -65,7 +67,15 @@ void uart_init()
 }
 
 void uart_handle_irq() {
-	mmio_write(UART0_ICR, 0x7FF);
+		if (
+			(mmio_read(UART0_DR) & 8) |
+			(mmio_read(UART0_DR) & 9) |
+			(mmio_read(UART0_DR) & 10) |
+			(mmio_read(UART0_DR) & 11)
+		) return;
+
+		uart_putc(mmio_read(UART0_DR) & 0xFF);
+		mmio_write(UART0_ICR, 0x7FF);
 }
 
 void uart_putc(unsigned char c)

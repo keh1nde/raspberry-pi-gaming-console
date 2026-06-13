@@ -1,8 +1,8 @@
 # Build artifacts
-p-docs/release-assets/v1.0.0/kernel8.elf
-p-docs/release-assets/v1.0.0/kernel8.img
 buiid/
 obj/
+kernel8.img
+kernel8.elf
 
 # Local data
 p-docs/
