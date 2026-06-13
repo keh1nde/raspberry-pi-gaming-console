@@ -2,8 +2,8 @@
  * @file uart.h
  * @brief PL011 UART driver — public API for serial I/O.
  *
- * Part of kehinde-kernel: a bare-metal AArch64 operating system for the
- * Raspberry Pi 3 Model B (Cortex-A53) and Pi 5 (Cortex-A76).
+ * Part of raspberry-pi-gaming-console, a retro gaming console OS.
+ * Built on the kehinde-kernel project, originally MIT-licensed.
  *
  * Exposes the BCM2835's PL011 UART as a kernel-wide console. Boot logging,
  * panic messages, and the interactive shell all funnel through this module.
@@ -15,7 +15,7 @@
  *   - BCM2835 ARM Peripherals, §13 (UART)
  *
  * @author Kehinde Adeoso
- * @copyright 2026 Kehinde Adeoso. SPDX-License-Identifier: MIT
+ * @copyright 2026 Kehinde Adeoso. SPDX-License-Identifier: GPL-3.0-only
  */
 
 #pragma once

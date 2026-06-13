@@ -2,8 +2,8 @@
  * @file heap_alloc.cpp
  * @brief Bump heap allocator with lazy page-backed VA mapping.
  *
- * Part of kehinde-kernel: a bare-metal AArch64 operating system for the
- * Raspberry Pi 3 Model B (Cortex-A53) and Pi 5 (Cortex-A76).
+ * Part of raspberry-pi-gaming-console, a retro gaming console OS.
+ * Built on the kehinde-kernel project, originally MIT-licensed.
  *
  * The heap reserves a fixed virtual range and grows on demand: each
  * #kmalloc that advances `bump_ptr` past `heap_end` pulls fresh physical
@@ -16,7 +16,7 @@
  *   - `heap_end` is page-aligned and always `>= bump_ptr`.
  *
  * @author Kehinde Adeoso
- * @copyright 2026 Kehinde Adeoso. SPDX-License-Identifier: MIT
+ * @copyright 2026 Kehinde Adeoso. SPDX-License-Identifier: GPL-3.0-only
  */
 
 #include "heap_alloc.h"

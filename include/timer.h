@@ -2,8 +2,8 @@
  * @file timer.h
  * @brief ARM Generic Timer (CNTP, EL0 physical timer) — public API.
  *
- * Part of kehinde-kernel: a bare-metal AArch64 operating system for the
- * Raspberry Pi 3 Model B (Cortex-A53) and Pi 5 (Cortex-A76).
+ * Part of raspberry-pi-gaming-console, a retro gaming console OS.
+ * Built on the kehinde-kernel project, originally MIT-licensed.
  *
  * Drives the per-core physical timer at a fixed 10 Hz tick. Tick count is
  * incremented from inside the IRQ handler (see
@@ -15,7 +15,7 @@
  *   - Arm Architecture Reference Manual for A-profile, §D11 (Generic Timer)
  *
  * @author Kehinde Adeoso
- * @copyright 2026 Kehinde Adeoso. SPDX-License-Identifier: MIT
+ * @copyright 2026 Kehinde Adeoso. SPDX-License-Identifier: GPL-3.0-only
  */
 
 #pragma once

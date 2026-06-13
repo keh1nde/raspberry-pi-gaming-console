@@ -2,8 +2,8 @@
  * @file filesystem.h
  * @brief In-memory filesystem (ramfs) — types, constants, and public API.
  *
- * Part of kehinde-kernel: a bare-metal AArch64 operating system for the
- * Raspberry Pi 3 Model B (Cortex-A53) and Pi 5 (Cortex-A76).
+ * Part of raspberry-pi-gaming-console, a retro gaming console OS.
+ * Built on the kehinde-kernel project, originally MIT-licensed.
  *
  * Layout: a single global linked list of `inode` records (`inode_list_head`)
  * keyed by monotonically-increasing `ino`. Tree shape is implicit — a
@@ -21,7 +21,7 @@
  * allocator replaces the bump.
  *
  * @author Kehinde Adeoso
- * @copyright 2026 Kehinde Adeoso. SPDX-License-Identifier: MIT
+ * @copyright 2026 Kehinde Adeoso. SPDX-License-Identifier: GPL-3.0-only
  */
 
 #ifndef RASPBERRY_PI_OPERATING_SYSTEM_FILESYSTEM_H

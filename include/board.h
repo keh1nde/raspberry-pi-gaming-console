@@ -2,8 +2,8 @@
  * @file board.h
  * @brief Board-specific MMIO base addresses and CPU identifiers, selected at compile time.
  *
- * Part of kehinde-kernel: a bare-metal AArch64 operating system for the
- * Raspberry Pi 3 Model B (Cortex-A53) and Pi 5 (Cortex-A76).
+ * Part of raspberry-pi-gaming-console, a retro gaming console OS.
+ * Built on the kehinde-kernel project, originally MIT-licensed.
  *
  * Board-specific constants (MMIO base addresses, CPU identifiers)
  * selected at compile time via BOARD_PI3 or BOARD_PI5 preprocessor define.
@@ -14,7 +14,7 @@
  * a later date.
  *
  * @author Kehinde Adeoso
- * @copyright 2026 Kehinde Adeoso. SPDX-License-Identifier: MIT
+ * @copyright 2026 Kehinde Adeoso. SPDX-License-Identifier: GPL-3.0-only
  */
 
 #pragma once

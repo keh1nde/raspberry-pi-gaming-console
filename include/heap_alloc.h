@@ -2,8 +2,8 @@
  * @file heap_alloc.h
  * @brief Kernel heap — bump allocator with lazy-mapped backing pages.
  *
- * Part of kehinde-kernel: a bare-metal AArch64 operating system for the
- * Raspberry Pi 3 Model B (Cortex-A53) and Pi 5 (Cortex-A76).
+ * Part of raspberry-pi-gaming-console, a retro gaming console OS.
+ * Built on the kehinde-kernel project, originally MIT-licensed.
  *
  * Reserves the virtual range `[HEAP_BASE, HEAP_BASE + HEAP_MAX_SIZE)`
  * (1 MiB at the 4 GiB mark) by convention; physical frames are pulled from
@@ -12,7 +12,7 @@
  * intended substrate for a future slab/free-list allocator.
  *
  * @author Kehinde Adeoso
- * @copyright 2026 Kehinde Adeoso. SPDX-License-Identifier: MIT
+ * @copyright 2026 Kehinde Adeoso. SPDX-License-Identifier: GPL-3.0-only
  */
 
 #ifndef RASPBERRY_PI_OPERATING_SYSTEM_HEAP_ALLOC_H

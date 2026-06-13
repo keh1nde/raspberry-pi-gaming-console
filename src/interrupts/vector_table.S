@@ -1,8 +1,8 @@
 // @file vector_table.S
 // @brief AArch64 exception vector table + register save/restore stubs.
 //
-// Part of kehinde-kernel: a bare-metal AArch64 operating system for the
-// Raspberry Pi 3 Model B (Cortex-A53) and Pi 5 (Cortex-A76).
+// Part of raspberry-pi-gaming-console, a retro gaming console OS.
+// Built on the kehinde-kernel project, originally MIT-licensed.
 //
 // The AArch64 vector table is 16 entries laid out at 128-byte intervals,
 // the whole table 2 KiB aligned. Entries are grouped into four bands:
@@ -26,7 +26,7 @@
 //   - Arm Architecture Reference Manual for A-profile, §D1.10 (Vector tables)
 //
 // @author Kehinde Adeoso
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: GPL-3.0-only
 
 .section ".text"
 .balign 2048

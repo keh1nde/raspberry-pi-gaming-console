@@ -2,8 +2,8 @@
  * @file filesystem.cpp
  * @brief In-memory filesystem (ramfs) implementation.
  *
- * Part of kehinde-kernel: a bare-metal AArch64 operating system for the
- * Raspberry Pi 3 Model B (Cortex-A53) and Pi 5 (Cortex-A76).
+ * Part of raspberry-pi-gaming-console, a retro gaming console OS.
+ * Built on the kehinde-kernel project, originally MIT-licensed.
  *
  * See `<filesystem.h>` for the type and API contracts; this file documents
  * implementation details, invariants, and known pitfalls. The filesystem
@@ -21,7 +21,7 @@
  *     which on the Pi 3 lands silently in identity-mapped low RAM.
  *
  * @author Kehinde Adeoso
- * @copyright 2026 Kehinde Adeoso. SPDX-License-Identifier: MIT
+ * @copyright 2026 Kehinde Adeoso. SPDX-License-Identifier: GPL-3.0-only
  */
 
 #include "filesystem.h"

@@ -2,8 +2,8 @@
  * @file pmm.h
  * @brief Physical Memory Manager — public API and shared constants.
  *
- * Part of kehinde-kernel: a bare-metal AArch64 operating system for the
- * Raspberry Pi 3 Model B (Cortex-A53) and Pi 5 (Cortex-A76).
+ * Part of raspberry-pi-gaming-console, a retro gaming console OS.
+ * Built on the kehinde-kernel project, originally MIT-licensed.
  *
  * The PMM is a flat-bitmap frame allocator covering the physical range
  * `[__kernel_end, PHYS_MEM_END)`, in 4 KiB frames. The bitmap itself is
@@ -17,7 +17,7 @@
  * page-table memory; #pmm_init must run before #mmu_init.
  *
  * @author Kehinde Adeoso
- * @copyright 2026 Kehinde Adeoso. SPDX-License-Identifier: MIT
+ * @copyright 2026 Kehinde Adeoso. SPDX-License-Identifier: GPL-3.0-only
  */
 
 #ifndef RASPBERRY_PI_OPERATING_SYSTEM_PMM_H

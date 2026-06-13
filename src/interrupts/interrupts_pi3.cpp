@@ -2,8 +2,8 @@
  * @file interrupts.cpp
  * @brief Synchronous-exception decoder and IRQ controller bring-up.
  *
- * Part of kehinde-kernel: a bare-metal AArch64 operating system for the
- * Raspberry Pi 3 Model B (Cortex-A53) and Pi 5 (Cortex-A76).
+ * Part of raspberry-pi-gaming-console, a retro gaming console OS.
+ * Built on the kehinde-kernel project, originally MIT-licensed.
  *
  * The vector table in `vector_table.S` calls into the two `extern "C"`
  * entry points defined here. Synchronous exceptions are treated as fatal
@@ -17,7 +17,7 @@
  *   - BCM2835 ARM Peripherals, §7 (Interrupts)
  *
  * @author Kehinde Adeoso
- * @copyright 2026 Kehinde Adeoso. SPDX-License-Identifier: MIT
+ * @copyright 2026 Kehinde Adeoso. SPDX-License-Identifier: GPL-3.0-only
  */
 
 /*

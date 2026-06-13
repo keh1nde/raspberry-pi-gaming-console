@@ -2,8 +2,8 @@
  * @file mmu.h
  * @brief AArch64 stage-1 MMU — public API and descriptor flag constants.
  *
- * Part of kehinde-kernel: a bare-metal AArch64 operating system for the
- * Raspberry Pi 3 Model B (Cortex-A53) and Pi 5 (Cortex-A76).
+ * Part of raspberry-pi-gaming-console, a retro gaming console OS.
+ * Built on the kehinde-kernel project, originally MIT-licensed.
  *
  * Configures a TTBR0-only, 4 KiB-granule, 39-bit-VA, three-level (L1→L2→L3)
  * translation regime. MAIR slots: Attr0 = Normal Inner/Outer WB cacheable,
@@ -13,7 +13,7 @@
  *   - Arm Architecture Reference Manual for A-profile, §D5 (VMSAv8-64)
  *
  * @author Kehinde Adeoso
- * @copyright 2026 Kehinde Adeoso. SPDX-License-Identifier: MIT
+ * @copyright 2026 Kehinde Adeoso. SPDX-License-Identifier: GPL-3.0-only
  */
 
 #pragma once

@@ -1,9 +1,8 @@
 // @file boot.S
 // @brief Kernel entry point — parks secondary cores, drops to EL1, jumps to C++.
 //
-// Part of kehinde-kernel: a bare-metal AArch64 operating system for the
-// Raspberry Pi 3 Model B (Cortex-A53) and Raspberry Pi 5 Model B
-// (Cortex A-76).
+// Part of raspberry-pi-gaming-console, a retro gaming console OS.
+// Built on the kehinde-kernel project, originally MIT-licensed.
 //
 // The Raspberry Pi firmware loads `kernel8.img` at physical 0x80000 and
 // drops every core into `_start` in EL2. Sequence:
@@ -22,7 +21,7 @@
 //   - Arm Architecture Reference Manual for A-profile, §D1 (Exception model)
 //
 // @author Kehinde Adeoso
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: GPL-3.0-only
 
 .section ".text.boot"
 
