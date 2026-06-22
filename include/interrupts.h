@@ -49,3 +49,31 @@ extern "C" void handle_interrupt_requests();
  * via `VBAR_EL1`) and before IRQs are unmasked.
  */
 extern "C" void interrupt_init();
+
+/**
+ * @brief Unexpected/fatal exception handler.
+ *
+ * Prints the decoded EC plus FAR_EL1/ELR_EL1 over UART, then halts. Used
+ * for the synchronous default case and as the shared diagnostic for any
+ * vector table entry that should never legitimately fire.
+ */
+extern "C" [[noreturn]] void handle_unexpected(uint64_t ec, uint64_t far, uint64_t elr);
+
+/**
+ * @brief SError (asynchronous abort) handler.
+ *
+ * SError syndrome is not guaranteed to carry a valid FAR_EL1, and the
+ * faulting instruction may already be gone by the time it is reported, so
+ * this never attempts to resume — it logs ESR_EL1/ELR_EL1 and halts.
+ */
+extern "C" [[noreturn]] void handle_serror();
+
+/**
+ * @brief Diagnostic handler for an unexpected FIQ.
+ *
+ * The GIC-400 only routes Group 0 interrupts to FIQ, and nothing is
+ * currently configured as Group 0, so this should never fire. ESR_EL1 is
+ * not valid for FIQ (it is not a synchronous trap), so only ELR_EL1 is
+ * logged before halting.
+ */
+extern "C" [[noreturn]] void handle_unexpected_fiq();

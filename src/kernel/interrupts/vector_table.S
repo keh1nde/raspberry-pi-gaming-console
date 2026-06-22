@@ -6,10 +6,20 @@
 //
 // The AArch64 vector table is 16 entries laid out at 128-byte intervals,
 // the whole table 2 KiB aligned. Entries are grouped into four bands:
-//   - Current EL with SP_EL0  (we don't use this — bands self-loop)
-//   - Current EL with SP_ELx  (active; sync + IRQ wired up)
-//   - Lower EL using AArch64  (no userspace yet)
-//   - Lower EL using AArch32  (we never run AArch32)
+//   - Current EL with SP_EL0  (unreachable — boot.S selects SP_ELx; self-loop)
+//   - Current EL with SP_ELx  (active; the kernel runs here)
+//   - Lower EL using AArch64  (unreachable until userspace exists)
+//   - Lower EL using AArch32  (we never run AArch32; self-loop)
+//
+// Sync and IRQ are EL-agnostic by construction — ESR_EL1's EC field already
+// encodes whether a sync exception came from the current EL or a lower one
+// (e.g. 0x21 vs 0x20 for instruction abort), and IRQ servicing just reads
+// the GIC's IAR regardless of source EL. So the Current-EL-SPx and
+// Lower-EL-AArch64 sync/IRQ entries share the same two handlers below —
+// this also means no rewrite is needed when userspace/SVC lands.
+// FIQ is wired to a diagnostic halt in both reachable bands: the GIC-400
+// only delivers Group 0 interrupts to FIQ, and nothing is configured as
+// Group 0, so it should never fire.
 //
 // Each used entry branches to a small stub below that saves the general
 // register file plus ELR_EL1/SPSR_EL1 onto the kernel stack, calls into a
@@ -97,27 +107,30 @@ vector_table:
 .balign 128
     b .                             // SError
 
-// Current EL with SPx — the kernel runs here.
+// Current EL with SPx
 .balign 128
     b sync_handler                  // Synchronous
 .balign 128
     b irq_handler                   // IRQ
 .balign 128
-    b .                             // FIQ
+    b fiq_handler                   // FIQ
 .balign 128
-    b .                             // SError
+    b serror_handler                // SError
 
-// Lower EL using AArch64 — no userspace yet.
+// Lower EL using AArch64: For userspace when implemented
+// Sync and IRQ share the same handlers as the Current-EL-SPx band
+// (see comment above); this is also where SVC dispatch will be
+// implemented once EL0 exists.
 .balign 128
-    b .                             // Synchronous
+    b sync_handler                  // Synchronous
 .balign 128
-    b .                             // IRQ
+    b irq_handler                   // IRQ
 .balign 128
-    b .                             // FIQ
+    b fiq_handler                   // FIQ
 .balign 128
-    b .                             // SError
+    b serror_handler                // SError
 
-// Lower EL using AArch32 — we never run AArch32.
+// Lower EL using AArch32 — unused
 .balign 128
     b .                             // Synchronous
 .balign 128
@@ -129,7 +142,7 @@ vector_table:
 
 
 // ====== Handler bodies. Placed outside the table so each table slot
-//        stays under the 128-byte budget. ======
+//        stays under the 128-byte limit. ======
 
 sync_handler:
     save_registers
@@ -140,5 +153,17 @@ sync_handler:
 irq_handler:
     save_registers
     bl handle_interrupt_requests
+    load_registers
+    eret
+
+serror_handler:
+    save_registers
+    bl handle_serror
+    load_registers
+    eret
+
+fiq_handler:
+    save_registers
+    bl handle_unexpected_fiq
     load_registers
     eret

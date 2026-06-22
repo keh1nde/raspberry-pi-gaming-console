@@ -55,10 +55,34 @@ enum : uint64_t {
 	GICC_EOIR = GICC_BASE + 0x010,
 };
 
+extern "C" void interrupt_init() {
+	// Disable all interrupts by writing 0 to bits 0 and 1
+	mmio_write(GICD_CTLR, 0);
+
+	// Personal Note:
+	// GICD_IPRIORITY7 controls priority for interrupt IDs 28-31
+	// Implement logic for setting and handling this register once
+	// the need arises. For now, the register will remain unset.
+
+	// Enable the physical timer
+	mmio_write(GICD_ISENABLER0, mmio_read(GICD_ISENABLER0) | (1 << 30));
+
+	// Re-enable distributor
+	mmio_write(GICD_CTLR, 1);
+
+	// Pass all priorities to CPU
+	mmio_write(GICC_PMR, 0xFF);
+
+	// Enable the CPU interface
+	mmio_write(GICC_CTLR, 1);
+}
+
 extern "C" void handle_synchronous_interrupts() {
 	// Snapshot the exception-state registers up front so any subsequent
 	// UART activity does not perturb FAR_EL1 / ELR_EL1.
-	uint64_t esr, far, elr;
+	uint64_t esr;
+	uint64_t far;
+	uint64_t elr;
 	asm volatile("mrs %0, ESR_EL1" : "=r"(esr));
 	asm volatile("mrs %0, FAR_EL1" : "=r"(far));
 	asm volatile("mrs %0, ELR_EL1" : "=r"(elr));
@@ -111,56 +135,11 @@ extern "C" void handle_synchronous_interrupts() {
 			while (true) {}
 		case 0x15:
 			uart_puts("SVC from AArch64: System call. \n");
-
+			break;
+		default:
+			handle_unexpected(ec, far, elr);
 	}
 }
-
-extern "C" void interrupt_init() {
-	// Disable all interrupts by writing 0 to bits 0 and 1
-	mmio_write(GICD_CTLR, 0);
-
-	// Personal Note:
-	// GICD_IPRIORITY7 controls priority for interrupt IDs 28-31
-	// Implement logic for setting and handling this register once
-	// the need arises. For now, the register will remain unset.
-
-	// Enable the physical timer
-	mmio_write(GICD_ISENABLER0, mmio_read(GICD_ISENABLER0) | (1 << 30));
-
-	// Re-enable distributor
-	mmio_write(GICD_CTLR, 1);
-
-	// Pass all priorities to CPU
-	mmio_write(GICC_PMR, 0xFF);
-
-	// Enable the CPU interface
-	mmio_write(GICC_CTLR, 1);
-}
-
-/*extern "C" void handle_interrupt_requests() {
-	uint64_t irq_pend_status;
-	irq_pend_status = mmio_read(IRQ_C0_SOURCE);
-
-	// UART interrupt handling.
-	// If UART bit is read, then handler is called from uart.cpp
-	if (mmio_read(IRQ_P2) & (1 << 25) ) {
-		uart_handle_irq();
-
-	}
-
-	// Per-core timer IRQ: reload CNTP_TVAL_EL0 for the next tick, then
-	// advance and print the in-kernel clock.
-	uint64_t freq = get_freq();
-	if (irq_pend_status & (1 << 1)) {
-		asm volatile("msr CNTP_TVAL_EL0, %0" :: "r"(freq / 10));
-		increment_time();
-
-		// The timer API is now in charge of printing time when called.
-		// As a result the bottom has been temporarily removed.
-
-		// print_time();
-	}
-}*/
 
 extern "C" void handle_interrupt_requests() {
 	uint64_t iar = mmio_read(GICC_IAR);
@@ -173,4 +152,45 @@ extern "C" void handle_interrupt_requests() {
 	}
 
 	mmio_write(GICC_EOIR, iar);
+}
+
+extern "C" [[noreturn]] void handle_serror() {
+	// FAR_EL1 is not guaranteed valid for SError, so it is deliberately not
+	// read here. ESR_EL1 still carries the SError syndrome.
+	uint64_t esr, elr;
+	asm volatile("mrs %0, ESR_EL1" : "=r"(esr));
+	asm volatile("mrs %0, ELR_EL1" : "=r"(elr));
+
+	uart_puts("An SError (asynchronous abort) has occurred.\r\n");
+	uart_puts("ESR_EL1: "); uart_put_hex(esr); uart_puts("\r\n");
+	uart_puts("ELR_EL1: "); uart_put_hex(elr); uart_puts("\r\n");
+
+	while (true) {
+		asm volatile("wfi");
+	}
+}
+
+extern "C" [[noreturn]] void handle_unexpected(uint64_t ec, uint64_t far, uint64_t elr) {
+	uart_puts("An unexpected error has occurred: \r\n");
+	uart_puts("EC: "); uart_put_hex(ec); uart_puts("\r\n");
+	uart_puts(" FAR: "); uart_put_hex(far); uart_puts("\r\n");
+	uart_puts(" ELR: "); uart_put_hex(elr); uart_puts("\r\n");
+
+	while (true) {
+		asm volatile("wfi");
+	}
+}
+
+extern "C" [[noreturn]] void handle_unexpected_fiq() {
+	// FIQ is not a synchronous trap, so ESR_EL1 is not updated for it and
+	// carries no meaningful syndrome here — only ELR_EL1 is worth reading.
+	uint64_t elr;
+	asm volatile("mrs %0, ELR_EL1" : "=r"(elr));
+
+	uart_puts("Unexpected FIQ: the GIC delivered a Group 0 interrupt but none are configured.\r\n");
+	uart_puts("ELR_EL1: "); uart_put_hex(elr); uart_puts("\r\n");
+
+	while (true) {
+		asm volatile("wfi");
+	}
 }
