@@ -19,7 +19,7 @@
  * @copyright 2026 Kehinde Adeoso. SPDX-License-Identifier: GPL-3.0-only
  */
 
-#include "heap_alloc.h"
+#include "kernel/heap_alloc.h"
 
 void kheap_init() {
 	bump_ptr = HEAP_BASE;

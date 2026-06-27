@@ -20,8 +20,8 @@
 
 #include <stddef.h>
 #include <stdint.h>
-#include "uart.h"
-#include "board.h"
+#include "kernel/uart.h"
+#include "kernel/board.h"
 
 // UART MMIO addresses are available in board.h
 

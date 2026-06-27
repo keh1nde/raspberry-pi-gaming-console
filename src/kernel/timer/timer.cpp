@@ -17,11 +17,9 @@
  * @copyright 2026 Kehinde Adeoso. SPDX-License-Identifier: GPL-3.0-only
  */
 
-#include "timer.h"
-
+#include "kernel/timer.h"
 #include <stdint.h>
-
-#include "uart.h"
+#include "kernel/uart.h"
 
 /** Tick counter; advanced by #increment_time from the IRQ. */
 static volatile uint64_t time;

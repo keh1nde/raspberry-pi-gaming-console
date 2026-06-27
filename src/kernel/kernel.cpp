@@ -27,14 +27,14 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#include "heap_alloc.h"
-#include "uart.h"
-#include "interrupts.h"
-#include "mmu.h"
-#include "pmm.h"
-#include "timer.h"
-#include "filesystem.h"
-#include "shell.h"
+#include "kernel/heap_alloc.h"
+#include "kernel/uart.h"
+#include "kernel/interrupts.h"
+#include "kernel/mmu.h"
+#include "kernel/pmm.h"
+#include "kernel/timer.h"
+#include "kernel/filesystem.h"
+#include "kernel/shell.h"
 
 /**
  * @brief C++ entry point. Called from `_start` in `boot.S`.

@@ -24,8 +24,8 @@
 #define RASPBERRY_PI_OPERATING_SYSTEM_PMM_H
 
 #include <stdint.h>
-#include <uart.h>
-#include "board.h"
+#include "kernel/uart.h"
+#include "kernel/board.h"
 
 
 /** Frame and page size in bytes (4 KiB). */

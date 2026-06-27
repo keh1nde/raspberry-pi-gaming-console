@@ -22,9 +22,9 @@
 #include <stdint.h>
 
 
-#include "pmm.h"
-#include "mmu.h"
-#include "uart.h"
+#include "kernel/pmm.h"
+#include "kernel/mmu.h"
+#include "kernel/uart.h"
 
 
 /** Virtual base address of the kernel heap (4 GiB mark). */

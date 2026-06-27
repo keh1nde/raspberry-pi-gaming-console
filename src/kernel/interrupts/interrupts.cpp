@@ -33,13 +33,13 @@
 *   0x3C: BRK instruction (debug breakpoint)
 */
 
-#include "interrupts.h"
+#include "kernel/interrupts.h"
 
 #include <stdint.h>
 
-#include "uart.h"
-#include "timer.h"
-#include "board.h"
+#include "kernel/uart.h"
+#include "kernel/timer.h"
+#include "kernel/board.h"
 
 /** GIC-400 and peripheral register addresses. */
 enum : uint64_t {

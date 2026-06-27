@@ -25,10 +25,10 @@
  * @copyright 2026 Kehinde Adeoso. SPDX-License-Identifier: MIT
  */
 
-#include "shell.h"
-#include "filesystem.h"
-#include "uart.h"
-#include "timer.h"
+#include "kernel/shell.h"
+#include "kernel/filesystem.h"
+#include "kernel/uart.h"
+#include "kernel/timer.h"
 
 /** Maximum command line length, in bytes. */
 #define MAX_LINE 256

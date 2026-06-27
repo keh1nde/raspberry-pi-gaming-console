@@ -39,10 +39,10 @@
 
 #include <stdint.h>
 
-#include "pmm.h"
-#include "uart.h"
-#include "mmu.h"
-#include "board.h"
+#include "kernel/pmm.h"
+#include "kernel/uart.h"
+#include "kernel/mmu.h"
+#include "kernel/board.h"
 
 /** Top-level (L1) translation table. Written by mmu_init; read by map,
  *  translate, and unmap. */

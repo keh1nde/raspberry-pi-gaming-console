@@ -14,7 +14,7 @@
  * @copyright 2026 Kehinde Adeoso. SPDX-License-Identifier: GPL-3.0-only
  */
 
-#include "pmm.h"
+#include "kernel/pmm.h"
 
 
 /** Allocation bitmap, located at the page-aligned `__kernel_end`. */

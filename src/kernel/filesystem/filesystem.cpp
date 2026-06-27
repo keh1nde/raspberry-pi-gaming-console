@@ -24,9 +24,9 @@
  * @copyright 2026 Kehinde Adeoso. SPDX-License-Identifier: GPL-3.0-only
  */
 
-#include "filesystem.h"
+#include "kernel/filesystem.h"
 
-#include "heap_alloc.h"
+#include "kernel/heap_alloc.h"
 
 
 /** Next inode number to hand out. Monotonic; never reused. */
