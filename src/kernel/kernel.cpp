@@ -25,6 +25,7 @@
  */
 
 #include <stddef.h>
+#include <stdint-gcc.h>
 #include <stdint.h>
 
 #include "kernel/heap_alloc.h"
@@ -35,6 +36,24 @@
 #include "kernel/timer.h"
 #include "kernel/filesystem.h"
 #include "kernel/shell.h"
+#include "kernel/spinlock.h"
+
+extern "C" int64_t psci_cpu_on(uint64_t mpidr, uint64_t entry, uint64_t context_id);
+
+extern "C" void secondary_entry();
+
+extern "C" void secondary_main() {
+	uint64_t core_id;
+	asm volatile("mrs %0, TPIDR_EL1" : "=r"(core_id));
+
+	uart_puts("Core ");
+	uart_put_uint(core_id);
+	uart_puts(" has been turned on.\r\n");
+
+	for (;;) {
+		asm volatile("wfe");
+	}
+}
 
 /**
  * @brief C++ entry point. Called from `_start` in `boot.S`.
@@ -68,5 +87,19 @@ extern "C" void kernel_main(uint32_t r0, uint32_t r1, uint32_t atags)
 	timer_init();
 	interrupt_init();
 
+	// Activate extra CPU cores
+
+	for (int i = 1; i < 4; i++) {
+		uint64_t stack_top = reinterpret_cast<uint64_t>(kmalloc(4096)) + 4096;
+		psci_cpu_on(
+			i,
+			reinterpret_cast<uint64_t>(&secondary_entry),
+			stack_top
+			);
+	}
+
+
 	shell_run();
 }
+
+

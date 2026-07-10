@@ -12,24 +12,6 @@
  * peripherals). MAIR slots: Attr0 = Normal Inner/Outer WB cacheable,
  * Attr1 = Device-nGnRnE.
  *
- * Mnemonic for register bring-up order:
- *   - MAIR: *who* are the memory types (define the vocabulary)
- *   - TCR:  *what* rules does the walker follow (define the grammar)
- *   - TTBR0: *where* is the top-level table (hand over the map)
- *   - SCTLR: *go* (flip M=1 and start translating)
- *
- * Barrier glossary (used pervasively below):
- *   - `dsb ish`   — wait for memory accesses to complete, inner-shareable.
- *   - `dsb ishst` — same but only orders stores.
- *   - `tlbi vmalle1` — invalidate every TLB entry in this regime.
- *   - `tlbi vaae1is, va` — invalidate one VA across all ASIDs, broadcast.
- *   - `isb` — flush the instruction pipeline so subsequent fetches see the
- *     new translation state.
- *
- * Page-table-edit sequence: `dsb ishst` (writes visible) → `tlbi vaae1is`
- * per page (kill stale translations) → `dsb ish` (let the invalidate
- * propagate) → `isb` (refetch). Used inside #map and #unmap.
- *
  * References:
  *   - Arm Architecture Reference Manual for A-profile, §D5 (VMSAv8-64)
  *
@@ -42,35 +24,43 @@
 #include "kernel/pmm.h"
 #include "kernel/uart.h"
 #include "kernel/mmu.h"
+
+#include "../../../include/kernel/spinlock.h"
 #include "kernel/board.h"
+#include "kernel/spinlock.h"
 
 /** Top-level (L1) translation table. Written by mmu_init; read by map,
  *  translate, and unmap. */
 uint64_t* l1_table;
 
+static spinlock mmu_lock = {0};
+
 
 void map(const uint64_t va, const uint64_t phys, const uint64_t size, uint64_t flags) {
 	uint64_t num_pages = size / PAGE_SIZE;
 
-	// Page-table-edit barrier sequence (see file header).
+	uint64_t irq_flags;
+	spin_lock(mmu_lock, irq_flags);
+
 	asm volatile("dsb ishst" ::: "memory");
 
 	for (int i = 0; i < num_pages; i++) {
 		uint64_t current_va = va + i * PAGE_SIZE;
 		uint64_t current_phys = phys + i * PAGE_SIZE;
 
-		// VA[38:30] = L1 index, VA[29:21] = L2 index, VA[20:12] = L3 index.
 		uint64_t L1_INDEX = (current_va >> 30) & 0x1FF;
 		uint64_t L2_INDEX = (current_va >> 21) & 0x1FF;
 
 		uint64_t* l2_table = _get_or_alloc_table(l1_table, L1_INDEX);
 		if (!l2_table) {
-			return; // TODO: real error path.
+			spin_unlock(mmu_lock, irq_flags);
+			return;
 		}
 
 		uint64_t* l3_table = _get_or_alloc_table(l2_table, L2_INDEX);
 		if (!l3_table) {
-			return; // TODO: real error path.
+			spin_unlock(mmu_lock, irq_flags);
+			return;
 		}
 
 		uint64_t L3_INDEX = (current_va >> 12) & 0x1FF;
@@ -79,13 +69,14 @@ void map(const uint64_t va, const uint64_t phys, const uint64_t size, uint64_t f
 		l3_table[L3_INDEX] = current_phys | flags | PAGE_VALID_BITS;
 	}
 
-	// Invalidate stale TLB entries for every page just written.
 	for (int i = 0; i < num_pages; i++) {
 		uint64_t va_page = (va + i * PAGE_SIZE) >> 12;
 		asm volatile("tlbi vaae1is, %0" :: "r"(va_page) : "memory");
 	}
 	asm volatile("dsb ish" ::: "memory");
 	asm volatile("isb" ::: "memory");
+
+	spin_unlock(mmu_lock, irq_flags);
 }
 
 uint64_t* _get_or_alloc_table(uint64_t* table, const uint64_t index) {
@@ -108,28 +99,36 @@ uint64_t* _get_or_alloc_table(uint64_t* table, const uint64_t index) {
 }
 
 uint64_t translate(uint64_t virt) {
+	uint64_t irq_flags;
+	spin_lock(mmu_lock, irq_flags);
+
 	uint64_t L1_INDEX = (virt >> 30) & 0x1FF;
 	uint64_t L2_INDEX = (virt >> 21) & 0x1FF;
 	uint64_t L3_INDEX = (virt >> 12) & 0x1FF;
 	const uint64_t ADDR_MASK = 0x0000FFFFFFFFF000ULL;
 
 	uint64_t l1_desc = l1_table[L1_INDEX];
-	if ((l1_desc & 0b11) != 0b11) return ~0ULL;
+	if ((l1_desc & 0b11) != 0b11) { spin_unlock(mmu_lock, irq_flags); return ~0ULL; }
 	uint64_t* l2_table = reinterpret_cast<uint64_t *>(l1_desc & ADDR_MASK);
 
 	uint64_t l2_desc = l2_table[L2_INDEX];
-	if ((l2_desc & 0b11) != 0b11) return ~0ULL;
+	if ((l2_desc & 0b11) != 0b11) { spin_unlock(mmu_lock, irq_flags); return ~0ULL; }
 	uint64_t* l3_table = reinterpret_cast<uint64_t *>(l2_desc & ADDR_MASK);
 
 	uint64_t l3_desc = l3_table[L3_INDEX];
-	if ((l3_desc & 0b11) != 0b11) return ~0ULL;
+	if ((l3_desc & 0b11) != 0b11) { spin_unlock(mmu_lock, irq_flags); return ~0ULL; }
 
-	// PA = (L3 frame address) | (low 12 bits of the original VA).
-	return (l3_desc & ADDR_MASK) | (virt & 0xFFFULL);
+	uint64_t pa = (l3_desc & ADDR_MASK) | (virt & 0xFFFULL);
+	spin_unlock(mmu_lock, irq_flags);
+	return pa;
 }
 
 void unmap(uint64_t va, uint64_t size) {
 	uint64_t num_pages = size / PAGE_SIZE;
+
+	uint64_t irq_flags;
+	spin_lock(mmu_lock, irq_flags);
+
 	asm volatile("dsb ishst" ::: "memory");
 
 	for (int i = 0; i < num_pages; i++) {
@@ -141,11 +140,11 @@ void unmap(uint64_t va, uint64_t size) {
 		const uint64_t ADDR_MASK = 0x0000FFFFFFFFF000ULL;
 
 		uint64_t l1_desc = l1_table[L1_INDEX];
-		if ((l1_desc & 0b11) != 0b11) return; // Early-return: see caveat in header.
+		if ((l1_desc & 0b11) != 0b11) { spin_unlock(mmu_lock, irq_flags); return; }
 		uint64_t* l2_table = reinterpret_cast<uint64_t *>(l1_desc & ADDR_MASK);
 
 		uint64_t l2_desc = l2_table[L2_INDEX];
-		if ((l2_desc & 0b11) != 0b11) return;
+		if ((l2_desc & 0b11) != 0b11) { spin_unlock(mmu_lock, irq_flags); return; }
 		uint64_t* l3_table = reinterpret_cast<uint64_t *>(l2_desc & ADDR_MASK);
 
 		l3_table[L3_INDEX] = 0;
@@ -174,6 +173,8 @@ void unmap(uint64_t va, uint64_t size) {
 
 	asm volatile("dsb ish" ::: "memory");
 	asm volatile("isb" ::: "memory");
+
+	spin_unlock(mmu_lock, irq_flags);
 }
 
 bool _table_is_empty(const uint64_t* table) {
@@ -184,6 +185,8 @@ bool _table_is_empty(const uint64_t* table) {
 }
 
 void mmu_init() {
+	mmu_lock.spin_lock = SPINLOCK_FREE;
+
 	// MAIR_EL1: define the memory-attribute vocabulary the walker will
 	// reference by index from L3 descriptors.
 	uint64_t mair = 0;
@@ -250,4 +253,6 @@ void mmu_init() {
 	asm volatile("msr SCTLR_EL1, %0" :: "r"(sctlr));
 
 	asm volatile("isb" ::: "memory");
+
+	MMU_ACTIVE = true;
 }

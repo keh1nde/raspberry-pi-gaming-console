@@ -20,6 +20,7 @@
 #include "kernel/timer.h"
 #include <stdint.h>
 #include "kernel/uart.h"
+#include "kernel/spinlock.h"
 
 /** Tick counter; advanced by #increment_time from the IRQ. */
 static volatile uint64_t time;
@@ -27,18 +28,28 @@ static volatile uint64_t time;
 /** Latched timer frequency in Hz (read from CNTFRQ_EL0 at init). */
 static volatile uint64_t freq;
 
+static spinlock timer_lock = {0};
+
 void timer_init() {
+	timer_lock.spin_lock = SPINLOCK_FREE;
 	asm volatile("mrs %0, CNTFRQ_EL0" : "=r"(freq));
 	asm volatile("msr CNTP_TVAL_EL0, %0" :: "r"(freq / 10));
 	asm volatile("msr CNTP_CTL_EL0, %0" :: "r"(1));
 }
 
 void increment_time() {
+	uint64_t flags;
+	spin_lock(timer_lock, flags);
 	time += 1;
+	spin_unlock(timer_lock, flags);
 }
 
 uint64_t get_time() {
-	return time;
+	uint64_t flags;
+	spin_lock(timer_lock, flags);
+	uint64_t t = time;
+	spin_unlock(timer_lock, flags);
+	return t;
 }
 
 

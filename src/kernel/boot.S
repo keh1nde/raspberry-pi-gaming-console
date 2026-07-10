@@ -16,9 +16,16 @@
 //   6. Unmask IRQs (DAIFClr #2 — clears I-bit only; F/A/D remain masked).
 //   7. Branch to `kernel_main`.
 //
-//
 // References:
 //   - Arm Architecture Reference Manual for A-profile, §D1 (Exception model)
+//   - Arm Power State Coordination Interface - Platform Design Document, Sections
+//     §3 (Assumptions and Recommendations), §4 (PSCI Use Cases and Use Case Requirements)
+//     and §5 (Functions), particularly §5.1 and §5.6 (Function Prototypes and CPU_ON)
+//   - ARM SMC Calling Convention (DEN0028)
+//   - Trusted Firmware-A Documentation
+//   - Arm A-profile Architecture Registers
+//      - MPIDR, Multiprocessor Affinity Register
+//      - TPIDR_EL1, EL1 Software Thread ID Register
 //
 // @author Kehinde Adeoso
 // SPDX-License-Identifier: GPL-3.0-only
@@ -33,6 +40,10 @@ _start:
     // Coordination Interface (PSCI), so the Pi 3-style MPIDR core check is
     // unnecessary. When multicore support lands, the other three cores will
     // be activated here.
+
+    mrs x0, MPIDR_EL1
+    and x0, x0, #0xFF
+    cbnz x0, halt
 
     b level_init
 
@@ -65,6 +76,15 @@ level_init:
     eret
 
 el1_entry:
+    // We explicitly set the current stack pointer to SP_EL1
+    // to avoid double exceptions on early-boot.
+    msr SPSel, #1
+
+    // Clear OS Lock so external debuggers can read CPU state (ELR_EL1, ESR_EL1, etc.)
+    // via the EDSCR/EDITR interface. Set by hardware at reset; must be cleared by software.
+    msr OSLAR_EL1, xzr
+    isb
+
     // Disable the MMU to avoid premature address translation.
     mrs x0, SCTLR_EL1
     bic x0, x0, #1
@@ -101,3 +121,42 @@ el1_entry:
 halt:
     wfe
     b       halt
+
+.global psci_cpu_on
+psci_cpu_on:
+    mov x3, x2 // Move context_id to x3 from default x2
+    mov x2, x1 // Move entry_address from x1 to x2
+    mov x1, x0 // Move MPIDR from x0 to x1
+
+    ldr x0, =0xC4000003 // set x0 to FUNCTION_ID
+
+    // Call SMCCC
+    smc #0
+
+    // Return to C++
+    ret
+
+.global secondary_entry
+secondary_entry:
+    // Set up Stack Pointer
+    mov sp, x0
+
+    // Install the interrupt vector table.
+    ldr     x0, =vector_table
+    msr     VBAR_EL1, x0
+
+    // Unmask IRQs (DAIF I-bit).
+    msr     DAIFClr, #2
+
+    // Set up CPU's Thread ID
+    mrs x0, MPIDR_EL1 // Set x0 to MPIDR_EL1
+    and x0, x0, #0xFF // Get Aff0
+    msr TPIDR_EL1, x0 // Write Aff0 to TPIDR_EL1
+
+    // Branch to secondary_main
+    bl secondary_main
+
+    // As a safety net, halt if execution
+    // continues past the last branch
+    b halt
+

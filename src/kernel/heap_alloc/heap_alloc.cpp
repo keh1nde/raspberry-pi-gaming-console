@@ -20,26 +20,34 @@
  */
 
 #include "kernel/heap_alloc.h"
+#include "kernel/spinlock.h"
+
+static spinlock heap_lock = {0};
 
 void kheap_init() {
+	heap_lock.spin_lock = SPINLOCK_FREE;
 	bump_ptr = HEAP_BASE;
 	heap_end = HEAP_BASE; // No frames mapped yet.
 }
 
 void *kmalloc(const uint64_t size) {
-	// Round to the 16-byte alignment guarantee.
 	const uint64_t aligned = (size + 15) & ~15ULL;
-	const uint64_t required_end = bump_ptr + aligned;
 
+	uint64_t flags;
+	spin_lock(heap_lock, flags);
+
+	const uint64_t required_end = bump_ptr + aligned;
 	if (required_end > HEAP_BASE + HEAP_MAX_SIZE) {
+		spin_unlock(heap_lock, flags);
 		panic("kmalloc: heap region exhausted");
 	}
 
-	// Lazy-map physical frames until the requested span is backed.
 	while (heap_end < required_end) {
 		uint64_t pa = alloc_frame();
-		if (pa == 0) panic("kmalloc: out of physical frames");
-
+		if (pa == 0) {
+			spin_unlock(heap_lock, flags);
+			panic("kmalloc: out of physical frames");
+		}
 		map(heap_end, pa, PAGE_SIZE, PTE_NORMAL_RW);
 		heap_end += PAGE_SIZE;
 	}
@@ -47,6 +55,7 @@ void *kmalloc(const uint64_t size) {
 	uint64_t result = bump_ptr;
 	bump_ptr += aligned;
 
+	spin_unlock(heap_lock, flags);
 	return reinterpret_cast<void*>(result);
 }
 

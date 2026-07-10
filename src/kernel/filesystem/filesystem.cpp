@@ -27,46 +27,50 @@
 #include "kernel/filesystem.h"
 
 #include "kernel/heap_alloc.h"
-
+#include "kernel/spinlock.h"
 
 /** Next inode number to hand out. Monotonic; never reused. */
 static uint64_t next_ino = 1;
 
+static spinlock fs_lock = {0};
+
 void fs_init() {
+	fs_lock.spin_lock = SPINLOCK_FREE;
+
+	uint64_t flags;
+	spin_lock(fs_lock, flags);
 	const auto root = static_cast<inode *>(kmalloc(sizeof(inode)));
-	root->ino = next_ino;
-	root->inode_type = 2;     // directory
+	root->ino = next_ino++;
+	root->inode_type = 2;
 	root->inode_size = 0;
 	root->first_block = nullptr;
 	root->next = inode_list_head;
 	inode_list_head = root;
-
-	next_ino++;
+	spin_unlock(fs_lock, flags);
 }
 
 uint64_t fs_lookup(const char* path) {
 	if (path[0] == '\0') return INVALID_INO;
 
-	// Decompose the path into segment end-indices. `start` walks the
-	// beginning index of the current segment.
+	uint64_t flags;
+	spin_lock(fs_lock, flags);
+
 	uint64_t start = 1;
 	uint64_t ends[16];
 	const uint64_t n = parse_path(path, ends, 16);
 
-	if (n == 0) return ROOT_INO; // parse_path returns 0 for the bare "/".
+	if (n == 0) { spin_unlock(fs_lock, flags); return ROOT_INO; }
 
 	const inode* curr = find_inode(ROOT_INO);
-	if (!curr) return INVALID_INO;
+	if (!curr) { spin_unlock(fs_lock, flags); return INVALID_INO; }
 
-	// Walk one segment at a time, hopping inodes through dirents.
 	for (uint64_t i = 0; i < n; i++) {
-		if (curr->inode_type != 2) return INVALID_INO; // not a directory
+		if (curr->inode_type != 2) { spin_unlock(fs_lock, flags); return INVALID_INO; }
 
 		bool found = false;
 		for (uint64_t j = 0; j < curr->inode_size; j++) {
-
 			const dirent* d = dirent_at(curr, j);
-			if (!d) return INVALID_INO;
+			if (!d) { spin_unlock(fs_lock, flags); return INVALID_INO; }
 
 			if (name_matches(path, start, ends[i], d->name)) {
 				curr = find_inode(d->inode_id);
@@ -75,29 +79,35 @@ uint64_t fs_lookup(const char* path) {
 				break;
 			}
 		}
-		if (!found) return INVALID_INO;
+		if (!found) { spin_unlock(fs_lock, flags); return INVALID_INO; }
 	}
-	return curr->ino;
+
+	uint64_t ino = curr->ino;
+	spin_unlock(fs_lock, flags);
+	return ino;
 }
 
 uint64_t fs_create(uint64_t parent_ino, const char* name, const uint8_t type) {
-	inode *parent = find_inode(parent_ino);
-	if (!parent) return INVALID_INO;
-	if (parent->inode_type != 2) return INVALID_INO;
+	uint64_t flags;
+	spin_lock(fs_lock, flags);
 
-	// Validate name: must be non-empty and short enough to fit a dirent.
-	if (__builtin_strlen(name) >= MAX_SIZE || name[0] == '\0') return INVALID_INO;
+	inode *parent = find_inode(parent_ino);
+	if (!parent) { spin_unlock(fs_lock, flags); return INVALID_INO; }
+	if (parent->inode_type != 2) { spin_unlock(fs_lock, flags); return INVALID_INO; }
+
+	if (__builtin_strlen(name) >= MAX_SIZE || name[0] == '\0') {
+		spin_unlock(fs_lock, flags);
+		return INVALID_INO;
+	}
 
 	const uint64_t dirents_per_block = sizeof(block::data) / sizeof(dirent);
 
-	// Reject duplicates.
 	for (int i = 0; i < parent->inode_size; i++) {
 		const dirent* d = dirent_at(parent, i);
-		if (!d) return INVALID_INO;
-		if (name_matches_single(d->name, name)) return INVALID_INO;
+		if (!d) { spin_unlock(fs_lock, flags); return INVALID_INO; }
+		if (name_matches_single(d->name, name)) { spin_unlock(fs_lock, flags); return INVALID_INO; }
 	}
 
-	// Allocate and initialize the new inode.
 	inode* new_inode = static_cast<inode *>(kmalloc(sizeof(inode)));
 	new_inode->ino = next_ino++;
 	new_inode->inode_type = type;
@@ -106,7 +116,6 @@ uint64_t fs_create(uint64_t parent_ino, const char* name, const uint8_t type) {
 	new_inode->next = inode_list_head;
 	inode_list_head = new_inode;
 
-	// Grow the parent's block chain if the current last block is full.
 	if (parent->inode_size % dirents_per_block == 0) {
 		append_block(parent);
 	}
@@ -120,7 +129,6 @@ uint64_t fs_create(uint64_t parent_ino, const char* name, const uint8_t type) {
 		else break;
 	}
 
-	// Write the dirent into the parent's tail block.
 	parent->inode_size++;
 	dirent *new_dirent = &reinterpret_cast<dirent*>(curr_block->data)[slot];
 	new_dirent->inode_id = new_inode->ino;
@@ -132,68 +140,74 @@ uint64_t fs_create(uint64_t parent_ino, const char* name, const uint8_t type) {
 	}
 	new_dirent->name[i] = '\0';
 
-	return new_inode->ino;
+	uint64_t ino = new_inode->ino;
+	spin_unlock(fs_lock, flags);
+	return ino;
 }
 
 int fs_unlink(const uint64_t parent_ino, const char *name) {
-	inode* parent = find_inode(parent_ino);
-	if (!parent) return -1;
-	if (parent->inode_type != 2 || parent->inode_size == 0) return -1;
+	uint64_t flags;
+	spin_lock(fs_lock, flags);
 
-	// Find the dirent. `subject_dirent` is the last-iterated pointer when
-	// the loop exits; the post-loop check below confirms it actually
-	// matched.
+	inode* parent = find_inode(parent_ino);
+	if (!parent) { spin_unlock(fs_lock, flags); return -1; }
+	if (parent->inode_type != 2 || parent->inode_size == 0) { spin_unlock(fs_lock, flags); return -1; }
+
 	dirent* subject_dirent = nullptr;
 	for (int i = 0; i < parent->inode_size; i++) {
 		subject_dirent = dirent_at(parent, i);
-		if (!subject_dirent) return -1;
+		if (!subject_dirent) { spin_unlock(fs_lock, flags); return -1; }
 		if (name_matches_single(subject_dirent->name, name)) break;
 	}
 
-	if (!subject_dirent || !name_matches_single(subject_dirent->name, name)) return -1;
+	if (!subject_dirent || !name_matches_single(subject_dirent->name, name)) {
+		spin_unlock(fs_lock, flags);
+		return -1;
+	}
 
 	dirent* last_dirent = dirent_at(parent, parent->inode_size - 1);
-	if (!last_dirent) return -1;
+	if (!last_dirent) { spin_unlock(fs_lock, flags); return -1; }
 
-	// Refuse to unlink a non-empty directory.
 	inode* subject_inode = find_inode(subject_dirent->inode_id);
-	if (!subject_inode || (subject_inode->inode_type == 2 && subject_inode->inode_size != 0)) return -1;
+	if (!subject_inode || (subject_inode->inode_type == 2 && subject_inode->inode_size != 0)) {
+		spin_unlock(fs_lock, flags);
+		return -1;
+	}
 
-	// Fast path: removing the tail dirent. Just decrement.
 	if (subject_dirent == last_dirent) {
 		parent->inode_size--;
+		spin_unlock(fs_lock, flags);
 		return 0;
 	}
 
-	// Swap-last: overwrite the removed slot with the last slot, then
-	// shrink. Order within a directory is not preserved.
 	*subject_dirent = *last_dirent;
 	parent->inode_size--;
+	spin_unlock(fs_lock, flags);
 	return 0;
 }
 
 int64_t fs_read(const uint64_t ino, const uint64_t offset, uint64_t len, void *buf) {
-	uint8_t* dst = static_cast<uint8_t *>(buf);
-
 	if (!buf) return -1;
 
+	uint64_t flags;
+	spin_lock(fs_lock, flags);
+
+	uint8_t* dst = static_cast<uint8_t *>(buf);
 	const uint64_t block_index = offset / sizeof(block::data);
 	const uint64_t byte_offset = offset % sizeof(block::data);
 
 	const inode* subject = find_inode(ino);
-	if (!subject) return -1;
-	if (subject->inode_type != 1) return -1;
+	if (!subject) { spin_unlock(fs_lock, flags); return -1; }
+	if (subject->inode_type != 1) { spin_unlock(fs_lock, flags); return -1; }
 
-	// Walk to the block that contains the start offset.
 	const block_t* current_block = subject->first_block;
 	for (int i = 0; i < block_index; i++) {
 		if (current_block) current_block = current_block->next;
-		else return -1;
+		else { spin_unlock(fs_lock, flags); return -1; }
 	}
 
-	if (offset >= subject->inode_size) return 0; // Reading at/past EOF.
+	if (offset >= subject->inode_size) { spin_unlock(fs_lock, flags); return 0; }
 
-	// Clamp `len` so we never read past EOF.
 	if (offset + len > subject->inode_size) {
 		len = subject->inode_size - offset;
 	}
@@ -211,24 +225,28 @@ int64_t fs_read(const uint64_t ino, const uint64_t offset, uint64_t len, void *b
 
 		bytes_copied += chunk;
 		block_offset = 0;
-
 		current_block = current_block->next;
 	}
+
+	spin_unlock(fs_lock, flags);
 	return len;
 }
 
 int64_t fs_write(uint64_t ino, uint64_t offset, uint64_t len, void *buf) {
 	if (!buf) return -1;
+
+	uint64_t flags;
+	spin_lock(fs_lock, flags);
+
 	const uint8_t* src = static_cast<uint8_t*>(buf);
 
 	inode* subject = find_inode(ino);
-	if (!subject) return -1;
-	if (subject->inode_type != 1) return -1;
+	if (!subject) { spin_unlock(fs_lock, flags); return -1; }
+	if (subject->inode_type != 1) { spin_unlock(fs_lock, flags); return -1; }
 
 	const uint64_t block_index = offset / sizeof(block::data);
 	const uint64_t byte_offset = offset % sizeof(block::data);
 
-	// Count existing blocks to compute current capacity.
 	uint64_t curr_inode_blocks = 0;
 	block_t* pointer = subject->first_block;
 	while (pointer) {
@@ -238,9 +256,6 @@ int64_t fs_write(uint64_t ino, uint64_t offset, uint64_t len, void *buf) {
 
 	uint64_t remaining_space = sizeof(block::data) * curr_inode_blocks;
 
-	// Grow the chain until capacity covers `offset + len`. NOTE: we must
-	// not capture `subject->first_block` into a local until *after* this
-	// loop — for a new file, the head pointer changes during growth.
 	if (offset + len > remaining_space) {
 		uint64_t added_blocks = 0;
 		while (offset + len > remaining_space) {
@@ -253,7 +268,7 @@ int64_t fs_write(uint64_t ino, uint64_t offset, uint64_t len, void *buf) {
 
 	for (int i = 0; i < block_index; i++) {
 		if (current_block) current_block = current_block->next;
-		else return -1;
+		else { spin_unlock(fs_lock, flags); return -1; }
 	}
 
 	uint64_t bytes_written = 0;
@@ -269,36 +284,47 @@ int64_t fs_write(uint64_t ino, uint64_t offset, uint64_t len, void *buf) {
 
 		bytes_written += chunk;
 		block_offset = 0;
-
 		current_block = current_block->next;
 	}
 
 	if (offset + len > subject->inode_size) {
-		subject->inode_size = offset+len;
+		subject->inode_size = offset + len;
 	}
+
+	spin_unlock(fs_lock, flags);
 	return len;
 }
 
 int64_t fs_readdir(const uint64_t dir_ino, const uint64_t index, dirent *out) {
-	inode* subject = find_inode(dir_ino);
-	if (!subject) return -1;
-	if (subject->inode_type != 2) return -1;
 	if (!out) return -1;
-	if (index >= subject->inode_size) return 0;
+
+	uint64_t flags;
+	spin_lock(fs_lock, flags);
+
+	inode* subject = find_inode(dir_ino);
+	if (!subject) { spin_unlock(fs_lock, flags); return -1; }
+	if (subject->inode_type != 2) { spin_unlock(fs_lock, flags); return -1; }
+	if (index >= subject->inode_size) { spin_unlock(fs_lock, flags); return 0; }
 
 	dirent* subject_dirent = dirent_at(subject, index);
-	if (!subject_dirent) return -1;
+	if (!subject_dirent) { spin_unlock(fs_lock, flags); return -1; }
 
 	*out = *subject_dirent;
 
+	spin_unlock(fs_lock, flags);
 	return 1;
 }
 
 int fs_stat(const uint64_t ino, uint64_t* size_out, uint8_t* type_out) {
+	uint64_t flags;
+	spin_lock(fs_lock, flags);
+
 	const inode* n = find_inode(ino);
-	if (!n) return -1;
+	if (!n) { spin_unlock(fs_lock, flags); return -1; }
 	if (size_out) *size_out = n->inode_size;
 	if (type_out) *type_out = n->inode_type;
+
+	spin_unlock(fs_lock, flags);
 	return 0;
 }
 

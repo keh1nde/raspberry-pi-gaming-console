@@ -13,7 +13,7 @@ OBJCOPY  = aarch64-elf-objcopy
 # -ffreestanding -nostdlib: no standard library or startup files assumed
 # -fno-exceptions -fno-rtti: required for bare-metal C++ (no runtime support)
 # -Wall: enable all warnings
-COMMON_FLAGS = -mcpu=cortex-a76 -ffreestanding -nostdlib -Wall
+COMMON_FLAGS = -mcpu=cortex-a76 -ffreestanding -nostdlib -Wall -g
 ASFLAGS  = $(COMMON_FLAGS)
 CXXFLAGS = $(COMMON_FLAGS) -fno-exceptions -fno-rtti
 LDFLAGS  = -nostdlib

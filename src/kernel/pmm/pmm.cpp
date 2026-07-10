@@ -15,7 +15,7 @@
  */
 
 #include "kernel/pmm.h"
-
+#include "kernel/spinlock.h"
 
 /** Allocation bitmap, located at the page-aligned `__kernel_end`. */
 uint64_t* bitmap;
@@ -26,8 +26,10 @@ uint64_t phys_mem_start = 0;
 /** Number of frames the bitmap covers. */
 uint64_t total_frames = 0;
 
+static spinlock pmm_lock = {0};
 
 void pmm_init() {
+	pmm_lock.spin_lock = SPINLOCK_FREE;
 	// Bitmap base: round __kernel_end up to a page boundary so it starts
 	// at a clean address regardless of how the linker laid out .bss.
 	const uint64_t bitmap_addr = round_up(reinterpret_cast<uint64_t>(__kernel_end), PAGE_SIZE);
@@ -70,17 +72,17 @@ uint64_t alloc_frame() {
 	static uint64_t count = 0;
 #endif
 
+	uint64_t flags;
+	spin_lock(pmm_lock, flags);
+
 	for (int i = 0; i < (total_frames + 63) / 64; ++i) {
 		if (bitmap[i] != ~0ULL) {
-			// First zero bit in this word — first free frame in this band.
 			const uint64_t bit_index = __builtin_ctzll(~bitmap[i]);
-
 			const uint64_t idx = i * 64 + bit_index;
-
-			// Mark used and compute the physical address.
 			bitmap[i] |= (1ULL << bit_index);
-
 			const uint64_t address = phys_mem_start + idx * PAGE_SIZE;
+
+			spin_unlock(pmm_lock, flags);
 
 #ifdef TRACE
 			count++;
@@ -92,28 +94,25 @@ uint64_t alloc_frame() {
 #endif
 			return address;
 		}
-
 	}
+
+	spin_unlock(pmm_lock, flags);
 	return 0; // Out of memory.
 }
 
 void free_frame(const uint64_t addr) {
-
-	// OOB address check, keeps from accessing invalid memory
 	if (addr < phys_mem_start || addr >= PHYS_MEM_END) return;
-
-	// Page-alignment check, ensures we acquire and free the correct frame.
 	if (addr % PAGE_SIZE != 0) return;
 
-	// Valid index check, keeps from indexing past bitmap end.
 	uint64_t frame_index = (addr - phys_mem_start) / PAGE_SIZE;
 	if (frame_index >= total_frames) return;
 
 	const uint64_t word_index = frame_index / 64;
 
-	// Guard: only clear if the bit is currently set. Prevents double-frees
-	// from spuriously reducing the used count below zero (informally).
+	uint64_t flags;
+	spin_lock(pmm_lock, flags);
 	if (const uint64_t bit_index = frame_index % 64; (bitmap[word_index] & (1ULL << bit_index)) != 0) {
 		bitmap[word_index] &= ~(1ULL << bit_index);
 	}
+	spin_unlock(pmm_lock, flags);
 }

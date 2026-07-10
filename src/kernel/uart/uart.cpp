@@ -22,10 +22,12 @@
 #include <stdint.h>
 #include "kernel/uart.h"
 #include "kernel/board.h"
+#include "kernel/spinlock.h"
 
-// UART MMIO addresses are available in board.h
+static spinlock uart_lock = {0};
 
 void uart_init(){
+	uart_lock.spin_lock = SPINLOCK_FREE;
 	// Disable the UART before reconfiguring.
 	mmio_write(UART0_CR, 0x00000000);
 
@@ -80,16 +82,21 @@ void uart_handle_irq() {
 
 void uart_putc(unsigned char c)
 {
-	// Spin while TXFF (TX FIFO full).
+	uint64_t flags;
+	spin_lock(uart_lock, flags);
 	while (mmio_read(UART0_FR) & (1 << 5)) { }
 	mmio_write(UART0_DR, c);
+	spin_unlock(uart_lock, flags);
 }
 
 unsigned char uart_getc()
 {
-	// Spin while RXFE (RX FIFO empty).
-	while ( mmio_read(UART0_FR) & (1 << 4) ) { }
-	return mmio_read(UART0_DR);
+	uint64_t flags;
+	spin_lock(uart_lock, flags);
+	while (mmio_read(UART0_FR) & (1 << 4)) { }
+	unsigned char c = mmio_read(UART0_DR);
+	spin_unlock(uart_lock, flags);
+	return c;
 }
 
 void uart_puts(const char* str)
