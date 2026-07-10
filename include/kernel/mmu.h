@@ -7,7 +7,8 @@
  *
  * Configures a TTBR0-only, 4 KiB-granule, 39-bit-VA, three-level (L1→L2→L3)
  * translation regime. MAIR slots: Attr0 = Normal Inner/Outer WB cacheable,
- * Attr1 = Device-nGnRnE. The kernel runs identity-mapped after #mmu_init.
+ * Attr1 = Device-nGnRnE, Attr2 = Normal Inner/Outer Non-cacheable (DMA
+ * buffers). The kernel runs identity-mapped after #mmu_init.
  *
  * References:
  *   - Arm Architecture Reference Manual for A-profile, §D5 (VMSAv8-64)
@@ -32,6 +33,11 @@ enum {
 	PTE_NORMAL_RW = 0x703,
 	/** Device-nGnRnE, EL1 RW, outer shareable, AF=1. */
 	PTE_DEVICE_RW = 0x707,
+	/** Normal Inner/Outer Non-cacheable, EL1 RW, outer shareable, AF=1.
+	 *  Used by #dma_alloc: nothing is ever cached here, so a CPU write is
+	 *  visible to a DMA-capable device (and vice versa) with no explicit
+	 *  cache-maintenance call needed. */
+	PTE_NORMAL_NC_RW = 0x60B,
 };
 
 

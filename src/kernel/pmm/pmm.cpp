@@ -100,6 +100,41 @@ uint64_t alloc_frame() {
 	return 0; // Out of memory.
 }
 
+uint64_t alloc_frames(const uint64_t count) {
+	if (count == 0) return 0;
+
+	uint64_t flags;
+	spin_lock(pmm_lock, flags);
+
+	uint64_t run_start = 0;
+	uint64_t run_len = 0;
+
+	for (uint64_t idx = 0; idx < total_frames; idx++) {
+		const uint64_t word = idx / 64;
+		const uint64_t bit = idx % 64;
+		const bool used = (bitmap[word] & (1ULL << bit)) != 0;
+
+		if (used) {
+			run_len = 0;
+			continue;
+		}
+
+		if (run_len == 0) run_start = idx;
+		run_len++;
+
+		if (run_len == count) {
+			for (uint64_t i = run_start; i < run_start + count; i++) {
+				bitmap[i / 64] |= (1ULL << (i % 64));
+			}
+			spin_unlock(pmm_lock, flags);
+			return phys_mem_start + run_start * PAGE_SIZE;
+		}
+	}
+
+	spin_unlock(pmm_lock, flags);
+	return 0; // No contiguous run of that length is free.
+}
+
 void free_frame(const uint64_t addr) {
 	if (addr < phys_mem_start || addr >= PHYS_MEM_END) return;
 	if (addr % PAGE_SIZE != 0) return;

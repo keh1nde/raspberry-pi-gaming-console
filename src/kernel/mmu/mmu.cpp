@@ -10,7 +10,8 @@
  * every VA equals its PA across the regions we care about
  * (low RAM, kernel + bitmap, free RAM, BCM2835 peripherals, ARM local
  * peripherals). MAIR slots: Attr0 = Normal Inner/Outer WB cacheable,
- * Attr1 = Device-nGnRnE.
+ * Attr1 = Device-nGnRnE, Attr2 = Normal Inner/Outer Non-cacheable (used by
+ * #dma_alloc for DMA-coherent buffers).
  *
  * References:
  *   - Arm Architecture Reference Manual for A-profile, §D5 (VMSAv8-64)
@@ -24,6 +25,7 @@
 #include "kernel/pmm.h"
 #include "kernel/uart.h"
 #include "kernel/mmu.h"
+#include "kernel/barrier.h"
 
 #include "../../../include/kernel/spinlock.h"
 #include "kernel/board.h"
@@ -42,7 +44,7 @@ void map(const uint64_t va, const uint64_t phys, const uint64_t size, uint64_t f
 	uint64_t irq_flags;
 	spin_lock(mmu_lock, irq_flags);
 
-	asm volatile("dsb ishst" ::: "memory");
+	dsb_ishst();
 
 	for (int i = 0; i < num_pages; i++) {
 		uint64_t current_va = va + i * PAGE_SIZE;
@@ -73,8 +75,8 @@ void map(const uint64_t va, const uint64_t phys, const uint64_t size, uint64_t f
 		uint64_t va_page = (va + i * PAGE_SIZE) >> 12;
 		asm volatile("tlbi vaae1is, %0" :: "r"(va_page) : "memory");
 	}
-	asm volatile("dsb ish" ::: "memory");
-	asm volatile("isb" ::: "memory");
+	dsb_ish();
+	isb();
 
 	spin_unlock(mmu_lock, irq_flags);
 }
@@ -129,7 +131,7 @@ void unmap(uint64_t va, uint64_t size) {
 	uint64_t irq_flags;
 	spin_lock(mmu_lock, irq_flags);
 
-	asm volatile("dsb ishst" ::: "memory");
+	dsb_ishst();
 
 	for (int i = 0; i < num_pages; i++) {
 		uint64_t current_va = va + i * PAGE_SIZE;
@@ -171,8 +173,8 @@ void unmap(uint64_t va, uint64_t size) {
 		asm volatile("tlbi vaae1is, %0" :: "r"(va_page) : "memory");
 	}
 
-	asm volatile("dsb ish" ::: "memory");
-	asm volatile("isb" ::: "memory");
+	dsb_ish();
+	isb();
 
 	spin_unlock(mmu_lock, irq_flags);
 }
@@ -192,7 +194,7 @@ void mmu_init() {
 	uint64_t mair = 0;
 	mair |= (0xFFULL << (0 * 8)); // Attr0: Normal Inner/Outer WB cacheable.
 	mair |= (0x00ULL << (1 * 8)); // Attr1: Device-nGnRnE.
-	mair |= (0x04ULL << (2 * 8)); // Attr2: reserved for future use.
+	mair |= (0x44ULL << (2 * 8)); // Attr2: Normal Inner/Outer Non-cacheable.
 	asm volatile("msr MAIR_EL1, %0" :: "r"(mair));
 
 	// TCR_EL1: walker configuration for TTBR0.
@@ -222,10 +224,10 @@ void mmu_init() {
 	l1_table = page_table_address;
 
 	// Clear any speculative state in the walker, then install TTBR0.
-	asm volatile("dsb ish" ::: "memory");
+	dsb_ish();
 	asm volatile("tlbi vmalle1" ::: "memory");
-	asm volatile("dsb ish" ::: "memory");
-	asm volatile("isb" ::: "memory");
+	dsb_ish();
+	isb();
 
 	asm volatile("msr TTBR0_EL1, %0" :: "r"(page_table_address));
 
@@ -252,7 +254,7 @@ void mmu_init() {
 	| (1ULL << 12); // I: instruction cache enable.
 	asm volatile("msr SCTLR_EL1, %0" :: "r"(sctlr));
 
-	asm volatile("isb" ::: "memory");
+	isb();
 
 	MMU_ACTIVE = true;
 }

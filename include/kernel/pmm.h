@@ -93,4 +93,20 @@ void free_frame(uint64_t addr);
  */
 uint64_t alloc_frame();
 
+/**
+ * @brief Allocate @p count physically-contiguous 4 KiB frames.
+ *
+ * Unlike #alloc_frame, this scans bit-by-bit (not word-at-a-time) looking
+ * for a run of @p count consecutive free bits, since a physically
+ * contiguous run is the point — a DMA-capable device follows physical
+ * addresses, not the CPU's page tables, so a multi-page DMA buffer can't be
+ * assembled from scattered frames the way a multi-page heap allocation can.
+ *
+ * @param count Number of consecutive 4 KiB frames needed. `0` is invalid.
+ * @return Physical base address of the first frame in the run, or `0` if no
+ *         run of that length is free (including fragmented-but-sufficient
+ *         total free memory — this does not compact or retry).
+ */
+uint64_t alloc_frames(uint64_t count);
+
 #endif //RASPBERRY_PI_OPERATING_SYSTEM_PMM_H
