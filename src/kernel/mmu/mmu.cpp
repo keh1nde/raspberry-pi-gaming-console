@@ -26,8 +26,6 @@
 #include "kernel/uart.h"
 #include "kernel/mmu.h"
 #include "kernel/barrier.h"
-
-#include "../../../include/kernel/spinlock.h"
 #include "kernel/board.h"
 #include "kernel/spinlock.h"
 
@@ -38,7 +36,7 @@ uint64_t* l1_table;
 static spinlock mmu_lock = {0};
 
 
-void map(const uint64_t va, const uint64_t phys, const uint64_t size, uint64_t flags) {
+bool map(const uint64_t va, const uint64_t phys, const uint64_t size, uint64_t flags) {
 	uint64_t num_pages = size / PAGE_SIZE;
 
 	uint64_t irq_flags;
@@ -55,14 +53,16 @@ void map(const uint64_t va, const uint64_t phys, const uint64_t size, uint64_t f
 
 		uint64_t* l2_table = _get_or_alloc_table(l1_table, L1_INDEX);
 		if (!l2_table) {
+			_unmap_locked(va, i * PAGE_SIZE);
 			spin_unlock(mmu_lock, irq_flags);
-			return;
+			return false;
 		}
 
 		uint64_t* l3_table = _get_or_alloc_table(l2_table, L2_INDEX);
 		if (!l3_table) {
+			_unmap_locked(va, i * PAGE_SIZE);
 			spin_unlock(mmu_lock, irq_flags);
-			return;
+			return false;
 		}
 
 		uint64_t L3_INDEX = (current_va >> 12) & 0x1FF;
@@ -79,6 +79,7 @@ void map(const uint64_t va, const uint64_t phys, const uint64_t size, uint64_t f
 	isb();
 
 	spin_unlock(mmu_lock, irq_flags);
+	return true;
 }
 
 uint64_t* _get_or_alloc_table(uint64_t* table, const uint64_t index) {
@@ -126,10 +127,16 @@ uint64_t translate(uint64_t virt) {
 }
 
 void unmap(uint64_t va, uint64_t size) {
-	uint64_t num_pages = size / PAGE_SIZE;
-
 	uint64_t irq_flags;
 	spin_lock(mmu_lock, irq_flags);
+
+	_unmap_locked(va, size);
+
+	spin_unlock(mmu_lock, irq_flags);
+}
+
+void _unmap_locked(uint64_t va, uint64_t size) {
+	uint64_t num_pages = size / PAGE_SIZE;
 
 	dsb_ishst();
 
@@ -142,27 +149,29 @@ void unmap(uint64_t va, uint64_t size) {
 		const uint64_t ADDR_MASK = 0x0000FFFFFFFFF000ULL;
 
 		uint64_t l1_desc = l1_table[L1_INDEX];
-		if ((l1_desc & 0b11) != 0b11) { spin_unlock(mmu_lock, irq_flags); return; }
+		if ((l1_desc & 0b11) != 0b11) { return; }
 		uint64_t* l2_table = reinterpret_cast<uint64_t *>(l1_desc & ADDR_MASK);
 
 		uint64_t l2_desc = l2_table[L2_INDEX];
-		if ((l2_desc & 0b11) != 0b11) { spin_unlock(mmu_lock, irq_flags); return; }
+		if ((l2_desc & 0b11) != 0b11) { return; }
 		uint64_t* l3_table = reinterpret_cast<uint64_t *>(l2_desc & ADDR_MASK);
 
 		l3_table[L3_INDEX] = 0;
 
 		// Clear L3 table if empty.
 		if (_table_is_empty(l3_table)) {
-			// Zero out table descriptors before freeing frame to ensure
-			// the walker doesn't follow a stale frame.
-
-			l3_table[L3_INDEX] = 0ULL;
+			// Clear the parent's descriptor first — otherwise l2_table[L2_INDEX]
+			// is left as a stale valid entry pointing at a frame the PMM now
+			// considers free, and a future alloc_frame() call can hand that
+			// same frame out again while this dangling descriptor still
+			// aliases it as a live table.
+			l2_table[L2_INDEX] = 0ULL;
 			free_frame(reinterpret_cast<uint64_t>(l3_table));
 		}
 
 		// Clear L2 table if empty.
 		if (_table_is_empty(l2_table)) {
-			l2_table[L2_INDEX] = 0ULL;
+			l1_table[L1_INDEX] = 0ULL;
 			free_frame(reinterpret_cast<uint64_t>(l2_table));
 		}
 	}
@@ -175,8 +184,6 @@ void unmap(uint64_t va, uint64_t size) {
 
 	dsb_ish();
 	isb();
-
-	spin_unlock(mmu_lock, irq_flags);
 }
 
 bool _table_is_empty(const uint64_t* table) {

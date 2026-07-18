@@ -62,3 +62,17 @@ void* dma_alloc(uint64_t size);
  * @param size The same size passed to that #dma_alloc call.
  */
 void dma_free(void* ptr, uint64_t size);
+
+/**
+ * @brief Undo a VA reservation made by a failed #dma_alloc call.
+ *
+ * Only rolls back `dma_bump_ptr` if nothing has reserved space past this
+ * range since — otherwise another core's concurrent reservation would be
+ * silently corrupted. Does not touch physical frames or any mapping; a
+ * caller that already obtained frames (i.e. failed at #map, not
+ * #alloc_frames) must free them itself before calling this.
+ *
+ * @param va   Virtual base address returned by the failed reservation.
+ * @param size The same size passed to that #dma_alloc call.
+ */
+void _dma_reclaim_va(uint64_t va, uint64_t size);

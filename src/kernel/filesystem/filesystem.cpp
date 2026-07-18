@@ -11,10 +11,6 @@
  * journaling, no caching layer, and no concurrency control.
  *
  * Implementation notes:
- *   - `strlen` and `memcpy` are provided as `extern "C"` symbols at the
- *     bottom of this file. At `-O0`, `__builtin_strlen` emits a real
- *     `strlen` call and struct copies emit `memcpy`. These are the kernel's
- *     sole definitions.
  *   - In #fs_write, `current_block` MUST be captured *after* the block-growth
  *     loop. For a new file, `first_block` is `nullptr` before #append_block
  *     runs; capturing it earlier writes through a null pointer offset 8,
@@ -25,6 +21,8 @@
  */
 
 #include "kernel/filesystem.h"
+
+#include <string.h>
 
 #include "kernel/heap_alloc.h"
 #include "kernel/spinlock.h"
@@ -95,7 +93,7 @@ uint64_t fs_create(uint64_t parent_ino, const char* name, const uint8_t type) {
 	if (!parent) { spin_unlock(fs_lock, flags); return INVALID_INO; }
 	if (parent->inode_type != 2) { spin_unlock(fs_lock, flags); return INVALID_INO; }
 
-	if (__builtin_strlen(name) >= MAX_SIZE || name[0] == '\0') {
+	if (strlen(name) >= MAX_SIZE || name[0] == '\0') {
 		spin_unlock(fs_lock, flags);
 		return INVALID_INO;
 	}
@@ -342,7 +340,7 @@ bool name_matches(const char* path, const uint64_t start,
 bool name_matches_single(const char *name1, const char *name2) {
 	uint64_t i = 0;
 
-	if (__builtin_strlen(name1) != __builtin_strlen(name2)) return false;
+	if (strlen(name1) != strlen(name2)) return false;
 
 	while (name1[i] != '\0' || name2[i] != '\0') {
 		if (name1[i] != name2[i]) return false;
@@ -359,7 +357,7 @@ uint64_t parse_path(const char* path, uint64_t* ends,
 
 	// Special-case the bare root so fs_lookup("/") can short-circuit to
 	// ROOT_INO without seeing a zero-length segment.
-	if (__builtin_strlen(path) == 1 && path[0] == '/') return 0;
+	if (strlen(path) == 1 && path[0] == '/') return 0;
 
 	while (path[i] != '\0' && count < max_segments) {
 		// Skip the leading '/', then scan to the next '/' or end of string.
@@ -420,25 +418,4 @@ bool name_copy(const char* path, uint64_t start, uint64_t end, const char* name)
 
 uint64_t min(const uint64_t a, const uint64_t b) {
 	return a < b ? a : b;
-}
-
-// ====== Freestanding libc shims ======
-//
-// At -O0, GCC emits real `strlen` and `memcpy` calls for `__builtin_strlen`
-// and struct-copy expressions. We aren't linking libc, so the kernel
-// provides its own definitions. Marked extern "C" so the symbol names
-// match the compiler's call sites.
-extern "C" {
-	uint64_t strlen(const char* s) {
-		uint64_t len = 0;
-		while (s[len]) len++;
-		return len;
-	}
-
-	void* memcpy(void* dst, const void* src, uint64_t n) {
-		uint8_t* d = static_cast<uint8_t*>(dst);
-		const uint8_t* s = static_cast<const uint8_t*>(src);
-		for (uint64_t i = 0; i < n; i++) d[i] = s[i];
-		return dst;
-	}
 }

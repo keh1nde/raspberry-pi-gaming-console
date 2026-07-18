@@ -29,6 +29,9 @@
 #include "kernel/filesystem.h"
 #include "kernel/uart.h"
 #include "kernel/timer.h"
+#include "kernel/pmm.h"
+#include "kernel/heap_alloc.h"
+#include "kernel/dma.h"
 
 /** Maximum command line length, in bytes. */
 #define MAX_LINE 256
@@ -183,6 +186,7 @@ static void cmd_help() {
     uart_puts("  clear                  clear the screen\r\n");
     uart_puts("  kernel                 show kernel info\r\n");
     uart_puts("  uptime                 print the uptime of the kernel\r\n");
+    uart_puts("  meminfo                print PMM/heap capacity-planning figures\r\n");
     uart_puts("  shutdown               halt the system\r\n");
     uart_puts("  help                   show this message\r\n");
 }
@@ -315,6 +319,57 @@ static void cmd_timer() {
     uart_puts("\n");
 }
 
+/** @brief Print @p bytes rounded down to whole MiB, no fractional part. */
+static void put_mib(uint64_t bytes) {
+    uart_put_uint(bytes / (1024 * 1024));
+    uart_puts(" MiB");
+}
+
+/**
+ * @brief `meminfo` — print PMM/heap capacity-planning figures.
+ *
+ * Development-only diagnostic: physical memory layout, live frame
+ * usage (scanned from the PMM bitmap), and each fixed-size arena's
+ * base/cap. Exists so sizing a new arena's `*_MAX_SIZE` (see
+ * `sbrk-capacity-planning` writeup) doesn't require hand-deriving these
+ * numbers via `nm` and the `pmm_init` bitmap math each time.
+ */
+static void cmd_meminfo() {
+    uart_puts("--- Physical memory (kernel/pmm.h, board.h) ---\r\n");
+    uart_puts("PHYS_MEM_END:    "); uart_put_hex(PHYS_MEM_END); uart_puts("\r\n");
+    uart_puts("phys_mem_start:  "); uart_put_hex(phys_mem_start); uart_puts("\r\n");
+    uart_puts("__kernel_end:    "); uart_put_hex(reinterpret_cast<uint64_t>(__kernel_end)); uart_puts("\r\n");
+
+    // pmm_init marks the bits past total_frames in the bitmap's final word as
+    // "used" so alloc_frame can't hand them out — subtract that padding back
+    // out so this reports real frame usage, not usage-plus-padding.
+    const uint64_t words = (total_frames + 63) / 64;
+    const uint64_t padding_bits = words * 64 - total_frames;
+    uint64_t raw_set_bits = 0;
+    for (uint64_t i = 0; i < words; i++) raw_set_bits += __builtin_popcountll(bitmap[i]);
+    const uint64_t used_frames = raw_set_bits - padding_bits;
+    const uint64_t free_frames = total_frames - used_frames;
+
+    uart_puts("total_frames:    "); uart_put_uint(total_frames);
+    uart_puts(" ("); put_mib(total_frames * PAGE_SIZE); uart_puts(")\r\n");
+    uart_puts("used_frames:     "); uart_put_uint(used_frames);
+    uart_puts(" ("); put_mib(used_frames * PAGE_SIZE); uart_puts(")\r\n");
+    uart_puts("free_frames:     "); uart_put_uint(free_frames);
+    uart_puts(" ("); put_mib(free_frames * PAGE_SIZE); uart_puts(")\r\n");
+
+    uart_puts("--- kmalloc heap (kernel/heap_alloc.h) ---\r\n");
+    uart_puts("HEAP_BASE:       "); uart_put_hex(HEAP_BASE); uart_puts("\r\n");
+    uart_puts("HEAP_MAX_SIZE:   "); uart_put_hex(HEAP_MAX_SIZE);
+    uart_puts(" ("); put_mib(HEAP_MAX_SIZE); uart_puts(")\r\n");
+    uart_puts("bump_ptr:        "); uart_put_hex(bump_ptr); uart_puts("\r\n");
+    uart_puts("heap_end:        "); uart_put_hex(heap_end); uart_puts("\r\n");
+
+    uart_puts("--- DMA arena (kernel/dma.h) ---\r\n");
+    uart_puts("DMA_BASE:        "); uart_put_hex(DMA_BASE); uart_puts("\r\n");
+    uart_puts("DMA_MAX_SIZE:    "); uart_put_hex(DMA_MAX_SIZE);
+    uart_puts(" ("); put_mib(DMA_MAX_SIZE); uart_puts(")\r\n");
+}
+
 // ====== Shell entry point ======
 
 void shell_run() {
@@ -346,6 +401,7 @@ void shell_run() {
         else if (seq(argv[0], "kernel"))   print_banner();
         else if (seq(argv[0], "shutdown")) cmd_shutdown();
         else if (seq(argv[0], "uptime")) cmd_timer();
+        else if (seq(argv[0], "meminfo")) cmd_meminfo();
         else {
             uart_puts(argv[0]);
             uart_puts(": command not found\r\n");

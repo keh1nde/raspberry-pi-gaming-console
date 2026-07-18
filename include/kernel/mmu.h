@@ -67,26 +67,48 @@ void mmu_init();
  * (`dsb ishst` → per-page `tlbi vaae1is` → `dsb ish` → `isb`) so the change
  * is visible everywhere before returning.
  *
+ * @return True if every page in `[va, va + size)` are successfully mapped.
+ * False if a failure occurs. Any pages mapped before a failure are
+ * unmapped before returning and any empty page tables created as
+ * a result are freed. It is the caller's responsibility to
+ * allocate or free the target `phys` memory.
+ *
  * @param va    Page-aligned virtual base address.
  * @param phys  Page-aligned physical base address.
  * @param size  Length in bytes; must be a multiple of `PAGE_SIZE`.
  * @param flags L3 descriptor flag template (see #PTE_NORMAL_RW, #PTE_DEVICE_RW).
  */
-void map(uint64_t va, uint64_t phys, uint64_t size, uint64_t flags);
+bool map(uint64_t va, uint64_t phys, uint64_t size, uint64_t flags);
 
 /**
  * @brief Tear down mappings for a contiguous VA range.
  *
  * Walks each 4 KiB page in `[va, va + size)` to L3 and zeros the descriptor,
- * then issues the same batched TLB-invalidate sequence as #map. Does not
- * reclaim intermediate L2 or L3 tables. If any L1 or L2 descriptor is
- * invalid mid-range, the function early-returns without invalidating any
- * already-cleared pages — partial unmap leaves stale TLB entries.
+ * then issues the same batched TLB-invalidate sequence as #map. If
+ * any L1 or L2 descriptor is invalid mid-range, the function
+ * early-returns without invalidating any already-cleared pages
+ * — partial unmap leaves stale TLB entries.
+ *
  *
  * @param va   Page-aligned virtual base address.
  * @param size Length in bytes; must be a multiple of `PAGE_SIZE`.
  */
 void unmap(uint64_t va, uint64_t size);
+
+/**
+ * @brief Undo an incomplete mapping.
+ *
+ * This helper is effectively a copy of the original unmap method.
+ * However, using that function to undo an incomplete mapping
+ * will result in a self-deadlock as both methods (unmap and map,
+ * the parent function) claim the same lock. Thus, this
+ * function utilizes the same unmapping process but does not attempt
+ * to claim the spinlock used in the parent function.
+ *
+ * @param va	 Page-aligned virtual base address
+ * @param size Length in bytes; must be a multiple of `PAGE_SIZE`
+ */
+void _unmap_locked(uint64_t va, uint64_t size);
 
 /**
  * @brief Resolve or create the next-level table referenced by @p table[@p index].

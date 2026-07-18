@@ -1,8 +1,12 @@
 # Build artifacts
-buiid/
+build/
 obj/
 kernel8.img
 kernel8.elf
+bootfs
+
+# Locally-built toolchain components (e.g. newlib) — see p-docs/newlib-port-roadmap.md
+toolchain/
 
 # Local data
 p-docs/

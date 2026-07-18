@@ -95,43 +95,55 @@ extern "C" void handle_synchronous_interrupts() {
 
 	switch (ec) {
 		case 0x20:
-			uart_puts("Instruction Abort from a lower EL.");
+			uart_puts("Instruction Abort from a lower EL.\r\n");
 			uart_puts("FAR_EL1: ");
 			uart_put_hex(far);
+			uart_puts("\r\n");
 			uart_puts("\nDFSC: ");
 			uart_put_hex(dfsc);
+			uart_puts("\r\n");
 			while (true) {}
 		case 0x21:
-			uart_puts("Instruction Abort from the same EL.\n");
-			uart_puts("There is likely no VA to PA mapping, or you did it wrong.\n");
+			uart_puts("Instruction Abort from the same EL.\r\n");
+			uart_puts("There is likely no VA to PA mapping, or you did it wrong.\r\n");
 			uart_puts("FAR_EL1: ");
 			uart_put_hex(far);
+			uart_puts("\r\n");
 			uart_puts("\nDFSC: ");
 			uart_put_hex(dfsc);
+			uart_puts("\r\n");
 			uart_put_hex(far);
+			uart_puts("\r\n");
 			while (true) {}
 		case 0x24:
-			uart_puts("Data Abort from a lower EL \n");
+			uart_puts("Data Abort from a lower EL \r\n");
 			uart_puts("FAR_EL1: ");
 			uart_put_hex(far);
+			uart_puts("\r\n");
 			uart_puts("\nDFSC: ");
 			uart_put_hex(dfsc);
+			uart_puts("\r\n");
 			uart_put_hex(far);
+			uart_puts("\r\n");
 			while (true) {}
 		case 0x25:
-			uart_puts("Data Abort from the same EL \n");
-			uart_puts("Kernel did a load/store to an unmapped or wrong-perm VA.\n");
+			uart_puts("Data Abort from the same EL \r\n");
+			uart_puts("Kernel did a load/store to an unmapped or wrong-perm VA.\r\n");
 			uart_puts("FAR_EL1: ");
 			uart_put_hex(far);
+			uart_puts("\r\n");
 			uart_puts("\nDFSC: ");
 			uart_put_hex(dfsc);
+			uart_puts("\r\n");
 			while (true) {}
 		case 0x0E:
 			uart_puts("Illegal execution state \n");
 			uart_puts("FAR_EL1: ");
 			uart_put_hex(far);
+			uart_puts("\r\n");
 			uart_puts("\nDFSC: ");
 			uart_put_hex(dfsc);
+			uart_puts("\r\n");
 			while (true) {}
 		case 0x15:
 			uart_puts("SVC from AArch64: System call. \n");

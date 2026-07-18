@@ -85,6 +85,21 @@ el1_entry:
     msr OSLAR_EL1, xzr
     isb
 
+    // Set this core's Thread ID (TPIDR_EL1) to its Aff0 value, same as
+    // secondary_entry does for cores 1-3. TPIDR_EL1 is unknown-at-reset,
+    // not guaranteed zero, so anything that reads it as a core index
+    // (e.g. a future per-core errno lookup) needs this set explicitly —
+    // core 0's Aff0 is always 0, so this is just that write, hardcoded.
+    msr TPIDR_EL1, xzr
+
+    // CPACR_EL1.FPEN = 0b11: grant EL0/EL1 access to Advanced SIMD/FP.
+    // Reset value traps every FP/SIMD instruction; newlib's varargs
+    // prologues (e.g. printf) spill FP/SIMD argument registers
+    // unconditionally, so this must be set before any libc call.
+    mov x4, #(0b11 << 20)
+    msr CPACR_EL1, x4
+    isb
+
     // Disable the MMU to avoid premature address translation.
     mrs x0, SCTLR_EL1
     bic x0, x0, #1
@@ -140,6 +155,12 @@ psci_cpu_on:
 secondary_entry:
     // Set up Stack Pointer
     mov sp, x0
+
+    // CPACR_EL1.FPEN = 0b11: grant EL0/EL1 access to Advanced SIMD/FP.
+    // Per-core register — must be set here too, not just in el1_entry.
+    mov x0, #(0b11 << 20)
+    msr CPACR_EL1, x0
+    isb
 
     // Install the interrupt vector table.
     ldr     x0, =vector_table
