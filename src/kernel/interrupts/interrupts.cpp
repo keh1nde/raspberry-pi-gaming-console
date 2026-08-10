@@ -77,7 +77,7 @@ extern "C" void interrupt_init() {
 	mmio_write(GICC_CTLR, 1);
 }
 
-extern "C" void handle_synchronous_interrupts() {
+extern "C" void handle_synchronous_interrupts(uint64_t* frame) {
 	// Snapshot the exception-state registers up front so any subsequent
 	// UART activity does not perturb FAR_EL1 / ELR_EL1.
 	uint64_t esr;
@@ -86,6 +86,14 @@ extern "C" void handle_synchronous_interrupts() {
 	asm volatile("mrs %0, ESR_EL1" : "=r"(esr));
 	asm volatile("mrs %0, FAR_EL1" : "=r"(far));
 	asm volatile("mrs %0, ELR_EL1" : "=r"(elr));
+
+	// Saved x30/LR (see vector_table.S: offset 240 bytes = word 30) — the
+	// return address into whichever function called the one that actually
+	// faulted. ELR_EL1 only tells you the faulting instruction itself,
+	// which is useless for pinpointing the call site when the fault
+	// happens inside a small leaf function (e.g. mmio_read) shared by many
+	// callers.
+	const uint64_t lr = frame[30];
 
 	// Decode ESR_EL1: EC = exception class (bits [31:26]),
 	// ISS = instruction-specific syndrome, DFSC = data-fault status code.
@@ -96,6 +104,15 @@ extern "C" void handle_synchronous_interrupts() {
 	switch (ec) {
 		case 0x20:
 			uart_puts("Instruction Abort from a lower EL.\r\n");
+			uart_puts("ESR_EL1: ");
+			uart_put_hex(esr);
+			uart_puts("\r\n");
+			uart_puts("ELR_EL1: ");
+			uart_put_hex(elr);
+			uart_puts("\r\n");
+			uart_puts("LR (x30): ");
+			uart_put_hex(lr);
+			uart_puts("\r\n");
 			uart_puts("FAR_EL1: ");
 			uart_put_hex(far);
 			uart_puts("\r\n");
@@ -106,6 +123,15 @@ extern "C" void handle_synchronous_interrupts() {
 		case 0x21:
 			uart_puts("Instruction Abort from the same EL.\r\n");
 			uart_puts("There is likely no VA to PA mapping, or you did it wrong.\r\n");
+			uart_puts("ESR_EL1: ");
+			uart_put_hex(esr);
+			uart_puts("\r\n");
+			uart_puts("ELR_EL1: ");
+			uart_put_hex(elr);
+			uart_puts("\r\n");
+			uart_puts("LR (x30): ");
+			uart_put_hex(lr);
+			uart_puts("\r\n");
 			uart_puts("FAR_EL1: ");
 			uart_put_hex(far);
 			uart_puts("\r\n");
@@ -117,6 +143,15 @@ extern "C" void handle_synchronous_interrupts() {
 			while (true) {}
 		case 0x24:
 			uart_puts("Data Abort from a lower EL \r\n");
+			uart_puts("ESR_EL1: ");
+			uart_put_hex(esr);
+			uart_puts("\r\n");
+			uart_puts("ELR_EL1: ");
+			uart_put_hex(elr);
+			uart_puts("\r\n");
+			uart_puts("LR (x30): ");
+			uart_put_hex(lr);
+			uart_puts("\r\n");
 			uart_puts("FAR_EL1: ");
 			uart_put_hex(far);
 			uart_puts("\r\n");
@@ -129,6 +164,15 @@ extern "C" void handle_synchronous_interrupts() {
 		case 0x25:
 			uart_puts("Data Abort from the same EL \r\n");
 			uart_puts("Kernel did a load/store to an unmapped or wrong-perm VA.\r\n");
+			uart_puts("ESR_EL1: ");
+			uart_put_hex(esr);
+			uart_puts("\r\n");
+			uart_puts("ELR_EL1: ");
+			uart_put_hex(elr);
+			uart_puts("\r\n");
+			uart_puts("LR (x30): ");
+			uart_put_hex(lr);
+			uart_puts("\r\n");
 			uart_puts("FAR_EL1: ");
 			uart_put_hex(far);
 			uart_puts("\r\n");
@@ -138,6 +182,15 @@ extern "C" void handle_synchronous_interrupts() {
 			while (true) {}
 		case 0x0E:
 			uart_puts("Illegal execution state \n");
+			uart_puts("ESR_EL1: ");
+			uart_put_hex(esr);
+			uart_puts("\r\n");
+			uart_puts("ELR_EL1: ");
+			uart_put_hex(elr);
+			uart_puts("\r\n");
+			uart_puts("LR (x30): ");
+			uart_put_hex(lr);
+			uart_puts("\r\n");
 			uart_puts("FAR_EL1: ");
 			uart_put_hex(far);
 			uart_puts("\r\n");

@@ -25,10 +25,17 @@
  *
  * Called from the `sync_handler` stub in the vector table after general
  * register state has been saved. Decodes ESR_EL1 (EC, ISS, DFSC) and
- * dumps FAR_EL1 / ELR_EL1 over UART before halting. Intended as a
- * panic/diagnostic path; does not return for fault-class exceptions.
+ * dumps FAR_EL1 / ELR_EL1 / the saved x30 (LR) over UART before halting.
+ * Intended as a panic/diagnostic path; does not return for fault-class
+ * exceptions.
+ *
+ * @param frame Base of the 272-byte register-save frame `sync_handler`
+ *  wrote to the stack (see vector_table.S's `save_registers` layout) —
+ *  passed in x0 per AAPCS64. `frame[30]` is the saved x30/LR: the return
+ *  address into whatever function called the one that faulted, since
+ *  ELR_EL1 alone only identifies the faulting instruction itself.
  */
-extern "C" void handle_synchronous_interrupts();
+extern "C" void handle_synchronous_interrupts(uint64_t* frame);
 
 /**
  * @brief IRQ dispatcher.

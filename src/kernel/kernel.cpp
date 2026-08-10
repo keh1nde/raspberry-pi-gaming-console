@@ -15,9 +15,13 @@
  *      onto virtual addressing.
  *   2. `kheap_init` — depends on the MMU for lazy mapping.
  *   3. `fs_init` — depends on the heap.
- *   4. `interrupt_init` — programs the IRQ controller; vector table is
+ *   4. `f_mount` the SD/FatFs volume, then `sd_selftest` — independent of
+ *      ramfs (`fs_init`), just grouped here as the other "storage" step.
+ *      Mount failure is non-fatal: boots on into the shell either way, so
+ *      a card-less/hardware-bringup boot still reaches a working prompt.
+ *   5. `interrupt_init` — programs the IRQ controller; vector table is
  *      already in place via boot.S.
- *   5. `shell_run` — does not return.
+ *   6. `shell_run` — does not return.
  *
  * The timer is intentionally not started here: its IRQ handler emits an
  * uptime message that would interleave with the shell prompt. Re-enable
@@ -30,6 +34,7 @@
 #include <stddef.h>
 #include <stdint-gcc.h>
 #include <stdint.h>
+#include <string.h>
 
 #include "kernel/heap_alloc.h"
 #include "kernel/uart.h"
@@ -41,6 +46,7 @@
 #include "kernel/shell.h"
 #include "kernel/spinlock.h"
 #include "kernel/crt.h"
+#include "lib/fatfs/ff.h"
 
 extern "C" int64_t psci_cpu_on(uint64_t mpidr, uint64_t entry, uint64_t context_id);
 
@@ -57,6 +63,56 @@ extern "C" void secondary_main() {
 	for (;;) {
 		asm volatile("wfe");
 	}
+}
+
+/** FatFs work area for the SD card volume. Must stay alive for the whole
+ *  process lifetime — f_mount() only registers it, it doesn't copy it. */
+static FATFS sd_fs;
+
+/**
+ * @brief End-to-end smoke test for the SD/FatFs stack: write a known
+ *  string to a file, close it, reopen it, read it back, and verify the
+ *  bytes match.
+ *
+ * Run once at boot right after a successful f_mount(), so hardware
+ * bring-up gets one pass/fail signal that actually exercises the whole
+ * chain — sdio_init() -> disk_initialize(), then disk_write()/disk_read()
+ * via FatFs's own file layer — rather than just "mount didn't error."
+ */
+static void sd_selftest() {
+	const char* path = "/knltest.txt";
+	const char* payload = "raspberry-pi-gaming-console SD self-test\n";
+	const UINT payload_len = static_cast<UINT>(strlen(payload));
+
+	FIL fil;
+	if (f_open(&fil, path, FA_WRITE | FA_CREATE_ALWAYS) != FR_OK) {
+		uart_puts("[sd_selftest] FAIL: could not create test file.\r\n");
+		return;
+	}
+	UINT written = 0;
+	const FRESULT write_res = f_write(&fil, payload, payload_len, &written);
+	f_close(&fil);
+	if (write_res != FR_OK || written != payload_len) {
+		uart_puts("[sd_selftest] FAIL: write incomplete or errored.\r\n");
+		return;
+	}
+
+	if (f_open(&fil, path, FA_READ) != FR_OK) {
+		uart_puts("[sd_selftest] FAIL: could not reopen test file.\r\n");
+		return;
+	}
+	char readback[64];
+	UINT read = 0;
+	const FRESULT read_res = f_read(&fil, readback, sizeof(readback) - 1, &read);
+	f_close(&fil);
+	if (read_res != FR_OK || read != payload_len || memcmp(readback, payload, payload_len) != 0) {
+		uart_puts("[sd_selftest] FAIL: read-back mismatch.\r\n");
+		return;
+	}
+
+	uart_puts("[sd_selftest] PASS: wrote, read back, and verified ");
+	uart_put_uint(payload_len);
+	uart_puts(" bytes.\r\n");
 }
 
 /**
@@ -90,6 +146,13 @@ extern "C" void kernel_main(uint32_t r0, uint32_t r1, uint32_t atags)
 
 	fs_init();
 	uart_puts("fs_init done.\r\n");
+
+	if (f_mount(&sd_fs, "", 1) == FR_OK) {
+		uart_puts("SD card mounted.\r\n");
+		sd_selftest();
+	} else {
+		uart_puts("SD card mount failed (no card, or init error).\r\n");
+	}
 
 	timer_init();
 	interrupt_init();

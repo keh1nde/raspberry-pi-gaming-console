@@ -5,3 +5,7 @@
 
 This project is in early bring-up. Documentation will follow once the design
 settles.
+
+Includes [FatFs](http://elm-chan.org/fsw/ff/) (R0.16) by ChaN, vendored under
+`lib/src/fatfs/` and `lib/include/lib/fatfs/` — see
+`lib/src/fatfs/LICENSE.txt` for its license.

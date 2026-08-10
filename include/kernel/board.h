@@ -5,23 +5,23 @@
  * Part of raspberry-pi-gaming-console, a retro gaming console OS.
  * Built on the kehinde-kernel project, originally MIT-licensed.
  *
- * Constants for the BCM2712 SoC and RP1 south bridge: the PCIe-windowed
- * peripheral base, GIC-400 distributor/CPU interface, RP1 UART, GPIO, and
- * UART clocks.
+ * Constants for all MMIO, including for the BCM2712 SoC and RP1 south bridge:
+ * the PCIe-windowed peripheral base, GIC-400 distributor/CPU interface,
+ * RP1 UART, GPIO, UART clocks, and SDIO MMIO registers.
  *
- * Note: GIC-400 variables have docustrings to eliminate the need to
- * revisit ARM documentation. All variables will recieve documentation at
+ * Note: Most variables have docstrings to eliminate the need to
+ * revisit documentation. All variables will recieve documentation at
  * a later date.
  *
  * @author Kehinde Adeoso
  * @copyright 2026 Kehinde Adeoso. SPDX-License-Identifier: GPL-3.0-only
  */
 
-#pragma once
 
 #include <stdint.h>
+#pragma once
 
-	/**
+/**
 	 * RP1 PCIe BAR0 as seen from the AP (Application Processor).
 	 *
 	 * The RP1 south bridge sits behind the BCM2712 PCIe root complex. This
@@ -248,4 +248,350 @@
 
 
 
+	/*
+	 * SDIO Addresses and MMIO offsets.
+	 *
+	 * Note that this list does not contain the UHS-II register addresses as
+	 * the PI 5 does not support this feature. For more information please
+	 * refer to the SD Host Controller Simplified Specification, V4.20 from
+	 * page 45 onward.
+	 */
+	// TODO: Write docstring when complete.
 
+	// Two identical MSHC instances; only one is wired to the physical microSD
+	// slot on this board, per the RP1 peripherals datasheet.
+	constexpr uint64_t SDIO0_BASE = PERIPHERAL_BASE + (0x40180000 - 0x40000000);
+	constexpr uint64_t SDIO1_BASE = PERIPHERAL_BASE + (0x40184000 - 0x40000000);
+
+	/**
+	* SDMA System Address (default) or 32-bit Block Count (only if Host
+	* Version 4 Enable is set in Host Control 2) — the same physical register
+	* serves either purpose depending on that mode bit, never both at once.
+	* In its default (SDMA) meaning, holds the system memory address an SDMA
+	* transfer reads from or writes to.
+	*/
+	constexpr uint64_t BLOCK_COUNT_LOW  = 0x000;
+	constexpr uint64_t BLOCK_COUNT_HIGH = 0x002;
+	constexpr uint64_t BLOCK_COUNT_LOW_SDIO0  = SDIO0_BASE + BLOCK_COUNT_LOW;
+	constexpr uint64_t BLOCK_COUNT_LOW_SDIO1  = SDIO1_BASE + BLOCK_COUNT_LOW;
+	constexpr uint64_t BLOCK_COUNT_HIGH_SDIO0 = SDIO0_BASE + BLOCK_COUNT_HIGH;
+	constexpr uint64_t BLOCK_COUNT_HIGH_SDIO1 = SDIO1_BASE + BLOCK_COUNT_HIGH;
+
+	/** Byte size of a single data block for the upcoming transfer. Unused bits
+	*  are reserved. */
+	constexpr uint64_t BLOCK_SIZE = 0x004;
+	constexpr uint64_t BLOCK_SIZE_SDIO0 = SDIO0_BASE + BLOCK_SIZE;
+	constexpr uint64_t BLOCK_SIZE_SDIO1 = SDIO1_BASE + BLOCK_SIZE;
+
+	/** Number of blocks to move for the current multiple-block transfer;
+	*  decrements automatically as each block completes. */
+	constexpr uint64_t BLOCK_COUNT = 0x006;
+	constexpr uint64_t BLOCK_COUNT_SDIO0 = SDIO0_BASE + BLOCK_COUNT;
+	constexpr uint64_t BLOCK_COUNT_SDIO1 = SDIO1_BASE + BLOCK_COUNT;
+
+	/** Holds the argument sent alongside the next issued SD command. */
+	constexpr uint64_t ARGUMENT_LOW  = 0x008;
+	constexpr uint64_t ARGUMENT_HIGH = 0x00A;
+	constexpr uint64_t ARGUMENT_LOW_SDIO0  = SDIO0_BASE + ARGUMENT_LOW;
+	constexpr uint64_t ARGUMENT_LOW_SDIO1  = SDIO1_BASE + ARGUMENT_LOW;
+	constexpr uint64_t ARGUMENT_HIGH_SDIO0 = SDIO0_BASE + ARGUMENT_HIGH;
+	constexpr uint64_t ARGUMENT_HIGH_SDIO1 = SDIO1_BASE + ARGUMENT_HIGH;
+
+	/** Configures how the data phase of the next command behaves — transfer
+	*  direction, single vs. multi-block, DMA use, and automatic stop-command
+	*  behavior. Some bits are reserved. */
+	constexpr uint64_t TRANSFER_MODE = 0x00C;
+	constexpr uint64_t TRANSFER_MODE_SDIO0 = SDIO0_BASE + TRANSFER_MODE;
+	constexpr uint64_t TRANSFER_MODE_SDIO1 = SDIO1_BASE + TRANSFER_MODE;
+
+	/** Holds the command index and response-format bits for the next command;
+	*  writing this register's upper byte is what actually triggers the
+	*  controller to issue it onto the bus. Some bits are reserved. */
+	constexpr uint64_t COMMAND = 0x00E;
+	constexpr uint64_t COMMAND_SDIO0 = SDIO0_BASE + COMMAND;
+	constexpr uint64_t COMMAND_SDIO1 = SDIO1_BASE + COMMAND;
+
+	/** Card response storage. Content and how it's packed across these
+	*  registers depends on the response type of the command that was issued
+	*  (short vs. long response). */
+	constexpr uint64_t RESPONSE0 = 0x010;
+	constexpr uint64_t RESPONSE1 = 0x012;
+	constexpr uint64_t RESPONSE2 = 0x014;
+	constexpr uint64_t RESPONSE3 = 0x016;
+	constexpr uint64_t RESPONSE4 = 0x018;
+	constexpr uint64_t RESPONSE5 = 0x01A;
+	constexpr uint64_t RESPONSE6 = 0x01C;
+	constexpr uint64_t RESPONSE7 = 0x01E;
+	constexpr uint64_t RESPONSE0_SDIO0 = SDIO0_BASE + RESPONSE0;
+	constexpr uint64_t RESPONSE0_SDIO1 = SDIO1_BASE + RESPONSE0;
+	constexpr uint64_t RESPONSE1_SDIO0 = SDIO0_BASE + RESPONSE1;
+	constexpr uint64_t RESPONSE1_SDIO1 = SDIO1_BASE + RESPONSE1;
+	constexpr uint64_t RESPONSE2_SDIO0 = SDIO0_BASE + RESPONSE2;
+	constexpr uint64_t RESPONSE2_SDIO1 = SDIO1_BASE + RESPONSE2;
+	constexpr uint64_t RESPONSE3_SDIO0 = SDIO0_BASE + RESPONSE3;
+	constexpr uint64_t RESPONSE3_SDIO1 = SDIO1_BASE + RESPONSE3;
+	constexpr uint64_t RESPONSE4_SDIO0 = SDIO0_BASE + RESPONSE4;
+	constexpr uint64_t RESPONSE4_SDIO1 = SDIO1_BASE + RESPONSE4;
+	constexpr uint64_t RESPONSE5_SDIO0 = SDIO0_BASE + RESPONSE5;
+	constexpr uint64_t RESPONSE5_SDIO1 = SDIO1_BASE + RESPONSE5;
+	constexpr uint64_t RESPONSE6_SDIO0 = SDIO0_BASE + RESPONSE6;
+	constexpr uint64_t RESPONSE6_SDIO1 = SDIO1_BASE + RESPONSE6;
+	constexpr uint64_t RESPONSE7_SDIO0 = SDIO0_BASE + RESPONSE7;
+	constexpr uint64_t RESPONSE7_SDIO1 = SDIO1_BASE + RESPONSE7;
+
+	/** Data port used to shuttle block data to/from the controller's internal
+	*  buffer one access at a time during non-DMA (PIO) transfers. */
+	constexpr uint64_t BUFFER_DATA_0 = 0x020;
+	constexpr uint64_t BUFFER_DATA_1 = 0x022;
+	constexpr uint64_t BUFFER_DATA_0_SDIO0 = SDIO0_BASE + BUFFER_DATA_0;
+	constexpr uint64_t BUFFER_DATA_0_SDIO1 = SDIO1_BASE + BUFFER_DATA_0;
+	constexpr uint64_t BUFFER_DATA_1_SDIO0 = SDIO0_BASE + BUFFER_DATA_1;
+	constexpr uint64_t BUFFER_DATA_1_SDIO1 = SDIO1_BASE + BUFFER_DATA_1;
+
+	/** Read-only live snapshot of controller/bus state — card presence, line
+	*  levels, and whether a command or data transfer can currently be
+	*  issued. Some bits are reserved. */
+	constexpr uint64_t PRESENT_STATE = 0x024;
+	constexpr uint64_t PRESENT_STATE_SDIO0 = SDIO0_BASE + PRESENT_STATE;
+	constexpr uint64_t PRESENT_STATE_SDIO1 = SDIO1_BASE + PRESENT_STATE;
+
+	/** General transfer configuration — bus width, speed mode, and DMA mode
+	*  selection. */
+	constexpr uint64_t HOST_CONTROL_1 = 0x028;
+	constexpr uint64_t HOST_CONTROL_1_SDIO0 = SDIO0_BASE + HOST_CONTROL_1;
+	constexpr uint64_t HOST_CONTROL_1_SDIO1 = SDIO1_BASE + HOST_CONTROL_1;
+
+	/** Controls whether, and at what voltage, the controller supplies power to
+	*  the card. Some bits are reserved. */
+	constexpr uint64_t POWER_CONTROL = 0x029;
+	constexpr uint64_t POWER_CONTROL_SDIO0 = SDIO0_BASE + POWER_CONTROL;
+	constexpr uint64_t POWER_CONTROL_SDIO1 = SDIO1_BASE + POWER_CONTROL;
+
+	/** Controls stopping/continuing a transfer at the gap between blocks. Some
+	*  bits are reserved. */
+	constexpr uint64_t BLOCK_GAP_CONTROL = 0x02A;
+	constexpr uint64_t BLOCK_GAP_CONTROL_SDIO0 = SDIO0_BASE + BLOCK_GAP_CONTROL;
+	constexpr uint64_t BLOCK_GAP_CONTROL_SDIO1 = SDIO1_BASE + BLOCK_GAP_CONTROL;
+
+	/** Enables the controller to wake the host system on card-related events
+	*  (insertion, removal, card interrupt). Some bits are reserved. */
+	constexpr uint64_t WAKEUP_CONTROL = 0x02B;
+	constexpr uint64_t WAKEUP_CONTROL_SDIO0 = SDIO0_BASE + WAKEUP_CONTROL;
+	constexpr uint64_t WAKEUP_CONTROL_SDIO1 = SDIO1_BASE + WAKEUP_CONTROL;
+
+	/** Selects and enables the SD clock supplied to the card, and reports
+	*  whether that clock has stabilized. */
+	constexpr uint64_t CLOCK_CONTROL = 0x02C;
+	constexpr uint64_t CLOCK_CONTROL_SDIO0 = SDIO0_BASE + CLOCK_CONTROL;
+	constexpr uint64_t CLOCK_CONTROL_SDIO1 = SDIO1_BASE + CLOCK_CONTROL;
+
+	/** Sets how long the controller waits before flagging a data-line timeout.
+	*  Some bits are reserved. */
+	constexpr uint64_t TIMEOUT_CONTROL = 0x02E;
+	constexpr uint64_t TIMEOUT_CONTROL_SDIO0 = SDIO0_BASE + TIMEOUT_CONTROL;
+	constexpr uint64_t TIMEOUT_CONTROL_SDIO1 = SDIO1_BASE + TIMEOUT_CONTROL;
+
+	/** Triggers a reset of part or all of the controller's internal state;
+	*  the written bit(s) self-clear once the reset completes. Some bits are
+	*  reserved. */
+	constexpr uint64_t SOFTWARE_RESET = 0x02F;
+	constexpr uint64_t SOFTWARE_RESET_SDIO0 = SDIO0_BASE + SOFTWARE_RESET;
+	constexpr uint64_t SOFTWARE_RESET_SDIO1 = SDIO1_BASE + SOFTWARE_RESET;
+
+	/** Latched status bits for routine events (command complete, transfer
+	*  complete, card insertion/removal, buffer ready, etc.); write 1 to a bit
+	*  to clear it. */
+	constexpr uint64_t NORMAL_INTERRUPT_STATUS = 0x030;
+	constexpr uint64_t NORMAL_INTERRUPT_STATUS_SDIO0 = SDIO0_BASE + NORMAL_INTERRUPT_STATUS;
+	constexpr uint64_t NORMAL_INTERRUPT_STATUS_SDIO1 = SDIO1_BASE + NORMAL_INTERRUPT_STATUS;
+
+	/** Latched status bits for error conditions encountered during a command
+	*  or data transfer; write 1 to a bit to clear it. */
+	constexpr uint64_t ERROR_INTERRUPT_STATUS = 0x032;
+	constexpr uint64_t ERROR_INTERRUPT_STATUS_SDIO0 = SDIO0_BASE + ERROR_INTERRUPT_STATUS;
+	constexpr uint64_t ERROR_INTERRUPT_STATUS_SDIO1 = SDIO1_BASE + ERROR_INTERRUPT_STATUS;
+
+	/** Masks which Normal Interrupt Status bits are allowed to latch at all;
+	*  independent of whether they also raise the interrupt line. */
+	constexpr uint64_t NORMAL_INTERRUPT_STATUS_ENABLE = 0x034;
+	constexpr uint64_t NORMAL_INTERRUPT_STATUS_ENABLE_SDIO0 = SDIO0_BASE + NORMAL_INTERRUPT_STATUS_ENABLE;
+	constexpr uint64_t NORMAL_INTERRUPT_STATUS_ENABLE_SDIO1 = SDIO1_BASE + NORMAL_INTERRUPT_STATUS_ENABLE;
+
+	/** Masks which Error Interrupt Status bits are allowed to latch at all. */
+	constexpr uint64_t ERROR_INTERRUPT_STATUS_ENABLE = 0x036;
+	constexpr uint64_t ERROR_INTERRUPT_STATUS_ENABLE_SDIO0 = SDIO0_BASE + ERROR_INTERRUPT_STATUS_ENABLE;
+	constexpr uint64_t ERROR_INTERRUPT_STATUS_ENABLE_SDIO1 = SDIO1_BASE + ERROR_INTERRUPT_STATUS_ENABLE;
+
+	/** Of the status bits already allowed to latch, masks which ones are also
+	*  allowed to actually raise the controller's interrupt line. */
+	constexpr uint64_t NORMAL_INTERRUPT_SIGNAL_ENABLE = 0x038;
+	constexpr uint64_t NORMAL_INTERRUPT_SIGNAL_ENABLE_SDIO0 = SDIO0_BASE + NORMAL_INTERRUPT_SIGNAL_ENABLE;
+	constexpr uint64_t NORMAL_INTERRUPT_SIGNAL_ENABLE_SDIO1 = SDIO1_BASE + NORMAL_INTERRUPT_SIGNAL_ENABLE;
+
+	/** Same idea as Normal Interrupt Signal Enable, for error status bits. */
+	constexpr uint64_t ERROR_INTERRUPT_SIGNAL_ENABLE = 0x03A;
+	constexpr uint64_t ERROR_INTERRUPT_SIGNAL_ENABLE_SDIO0 = SDIO0_BASE + ERROR_INTERRUPT_SIGNAL_ENABLE;
+	constexpr uint64_t ERROR_INTERRUPT_SIGNAL_ENABLE_SDIO1 = SDIO1_BASE + ERROR_INTERRUPT_SIGNAL_ENABLE;
+
+	/** Reports what went wrong with an automatically-issued stop command
+	*  (Auto CMD12/CMD23); only meaningful once the Auto CMD Error bit is set
+	*  in Error Interrupt Status. Some bits are reserved. */
+	constexpr uint64_t AUTO_CMD_ERROR_STATUS = 0x03C;
+	constexpr uint64_t AUTO_CMD_ERROR_STATUS_SDIO0 = SDIO0_BASE + AUTO_CMD_ERROR_STATUS;
+	constexpr uint64_t AUTO_CMD_ERROR_STATUS_SDIO1 = SDIO1_BASE + AUTO_CMD_ERROR_STATUS;
+
+	/** Controller-wide mode configuration — UHS mode select, 1.8V signaling,
+	*  tuning control, and the Host Version 4 Enable bit that changes the
+	*  meaning of several other registers in this block. */
+	constexpr uint64_t HOST_CONTROL_2 = 0x03E;
+	constexpr uint64_t HOST_CONTROL_2_SDIO0 = SDIO0_BASE + HOST_CONTROL_2;
+	constexpr uint64_t HOST_CONTROL_2_SDIO1 = SDIO1_BASE + HOST_CONTROL_2;
+
+	/** Read-only, hardware-fixed description of what this controller instance
+	*  actually supports — voltages, speed modes, DMA types, max block
+	*  length, base clock frequency, and similar. Some bits are reserved. */
+	constexpr uint64_t CAPABILITIES1 = 0x040;
+	constexpr uint64_t CAPABILITIES2 = 0x042;
+	constexpr uint64_t CAPABILITIES3 = 0x044;
+	constexpr uint64_t CAPABILITIES4 = 0x046;
+	constexpr uint64_t CAPABILITIES1_SDIO0 = SDIO0_BASE + CAPABILITIES1;
+	constexpr uint64_t CAPABILITIES1_SDIO1 = SDIO1_BASE + CAPABILITIES1;
+	constexpr uint64_t CAPABILITIES2_SDIO0 = SDIO0_BASE + CAPABILITIES2;
+	constexpr uint64_t CAPABILITIES2_SDIO1 = SDIO1_BASE + CAPABILITIES2;
+	constexpr uint64_t CAPABILITIES3_SDIO0 = SDIO0_BASE + CAPABILITIES3;
+	constexpr uint64_t CAPABILITIES3_SDIO1 = SDIO1_BASE + CAPABILITIES3;
+	constexpr uint64_t CAPABILITIES4_SDIO0 = SDIO0_BASE + CAPABILITIES4;
+	constexpr uint64_t CAPABILITIES4_SDIO1 = SDIO1_BASE + CAPABILITIES4;
+
+	/** Read-only, reports the maximum current the host system can supply per
+	*  voltage rail; only meaningful if the corresponding voltage's support is
+	*  indicated in Capabilities. */
+	constexpr uint64_t MAX_CAPABILITIES1 = 0x048;
+	constexpr uint64_t MAX_CAPABILITIES2 = 0x04A;
+	constexpr uint64_t MAX_CAPABILITIES1_SDIO0 = SDIO0_BASE + MAX_CAPABILITIES1;
+	constexpr uint64_t MAX_CAPABILITIES1_SDIO1 = SDIO1_BASE + MAX_CAPABILITIES1;
+	constexpr uint64_t MAX_CAPABILITIES2_SDIO0 = SDIO0_BASE + MAX_CAPABILITIES2;
+	constexpr uint64_t MAX_CAPABILITIES2_SDIO1 = SDIO1_BASE + MAX_CAPABILITIES2;
+
+	/** Continuation of Maximum Current Capabilities; mostly reserved today. */
+	constexpr uint64_t RES_MAX_CAPABILITIES1 = 0x04C;
+	constexpr uint64_t RES_MAX_CAPABILITIES2 = 0x04E;
+	constexpr uint64_t RES_MAX_CAPABILITIES1_SDIO0 = SDIO0_BASE + RES_MAX_CAPABILITIES1;
+	constexpr uint64_t RES_MAX_CAPABILITIES1_SDIO1 = SDIO1_BASE + RES_MAX_CAPABILITIES1;
+	constexpr uint64_t RES_MAX_CAPABILITIES2_SDIO0 = SDIO0_BASE + RES_MAX_CAPABILITIES2;
+	constexpr uint64_t RES_MAX_CAPABILITIES2_SDIO1 = SDIO1_BASE + RES_MAX_CAPABILITIES2;
+
+	/** Write-only test hook: artificially sets bits in Auto CMD Error Status,
+	*  for exercising error-handling paths without a real error occurring. */
+	constexpr uint64_t FORCE_AUTO_CMD_EVENT = 0x050;
+	constexpr uint64_t FORCE_AUTO_CMD_EVENT_SDIO0 = SDIO0_BASE + FORCE_AUTO_CMD_EVENT;
+	constexpr uint64_t FORCE_AUTO_CMD_EVENT_SDIO1 = SDIO1_BASE + FORCE_AUTO_CMD_EVENT;
+
+	/** Same idea as Force Event for Auto CMD Error Status, but for Error
+	*  Interrupt Status bits instead. */
+	constexpr uint64_t FORCE_ERROR_INTERRUPT_EVENT = 0x052;
+	constexpr uint64_t FORCE_ERROR_INTERRUPT_EVENT_SDIO0 = SDIO0_BASE + FORCE_ERROR_INTERRUPT_EVENT;
+	constexpr uint64_t FORCE_ERROR_INTERRUPT_EVENT_SDIO1 = SDIO1_BASE + FORCE_ERROR_INTERRUPT_EVENT;
+
+	/** Reports why/where an ADMA (descriptor-driven DMA) transfer failed; used
+	*  together with the ADMA System Address register to locate the failing
+	*  descriptor. Some bits are reserved. */
+	constexpr uint64_t ADMA_ERROR_STATUS = 0x054;
+	constexpr uint64_t ADMA_ERROR_STATUS_SDIO0 = SDIO0_BASE + ADMA_ERROR_STATUS;
+	constexpr uint64_t ADMA_ERROR_STATUS_SDIO1 = SDIO1_BASE + ADMA_ERROR_STATUS;
+
+	/** Physical address of the descriptor table ADMA2/ADMA3 reads from for a
+	*  descriptor-driven DMA transfer; one 64-bit register held as two 32-bit
+	*  halves. */
+	constexpr uint64_t ADMA_SYSTEM_ADDRESS_LOW  = 0x058;
+	constexpr uint64_t ADMA_SYSTEM_ADDRESS_HIGH = 0x05C;
+	constexpr uint64_t ADMA_SYSTEM_ADDRESS_LOW_SDIO0  = SDIO0_BASE + ADMA_SYSTEM_ADDRESS_LOW;
+	constexpr uint64_t ADMA_SYSTEM_ADDRESS_LOW_SDIO1  = SDIO1_BASE + ADMA_SYSTEM_ADDRESS_LOW;
+	constexpr uint64_t ADMA_SYSTEM_ADDRESS_HIGH_SDIO0 = SDIO0_BASE + ADMA_SYSTEM_ADDRESS_HIGH;
+	constexpr uint64_t ADMA_SYSTEM_ADDRESS_HIGH_SDIO1 = SDIO1_BASE + ADMA_SYSTEM_ADDRESS_HIGH;
+
+	/** Per-speed-mode preset clock-divisor/driver-strength values; used
+	*  automatically instead of Host Driver-computed settings when Preset
+	*  Value Enable is set in Host Control 2. One register per bus speed mode
+	*  (initialization, default speed, high speed, then each UHS-I mode). */
+	constexpr uint64_t PRESET_VALUE_1 = 0x060;
+	constexpr uint64_t PRESET_VALUE_2 = 0x062;
+	constexpr uint64_t PRESET_VALUE_3 = 0x064;
+	constexpr uint64_t PRESET_VALUE_4 = 0x066;
+	constexpr uint64_t PRESET_VALUE_5 = 0x068;
+	constexpr uint64_t PRESET_VALUE_6 = 0x06A;
+	constexpr uint64_t PRESET_VALUE_7 = 0x06C;
+	constexpr uint64_t PRESET_VALUE_8 = 0x06E;
+	constexpr uint64_t PRESET_VALUE_1_SDIO0 = SDIO0_BASE + PRESET_VALUE_1;
+	constexpr uint64_t PRESET_VALUE_1_SDIO1 = SDIO1_BASE + PRESET_VALUE_1;
+	constexpr uint64_t PRESET_VALUE_2_SDIO0 = SDIO0_BASE + PRESET_VALUE_2;
+	constexpr uint64_t PRESET_VALUE_2_SDIO1 = SDIO1_BASE + PRESET_VALUE_2;
+	constexpr uint64_t PRESET_VALUE_3_SDIO0 = SDIO0_BASE + PRESET_VALUE_3;
+	constexpr uint64_t PRESET_VALUE_3_SDIO1 = SDIO1_BASE + PRESET_VALUE_3;
+	constexpr uint64_t PRESET_VALUE_4_SDIO0 = SDIO0_BASE + PRESET_VALUE_4;
+	constexpr uint64_t PRESET_VALUE_4_SDIO1 = SDIO1_BASE + PRESET_VALUE_4;
+	constexpr uint64_t PRESET_VALUE_5_SDIO0 = SDIO0_BASE + PRESET_VALUE_5;
+	constexpr uint64_t PRESET_VALUE_5_SDIO1 = SDIO1_BASE + PRESET_VALUE_5;
+	constexpr uint64_t PRESET_VALUE_6_SDIO0 = SDIO0_BASE + PRESET_VALUE_6;
+	constexpr uint64_t PRESET_VALUE_6_SDIO1 = SDIO1_BASE + PRESET_VALUE_6;
+	constexpr uint64_t PRESET_VALUE_7_SDIO0 = SDIO0_BASE + PRESET_VALUE_7;
+	constexpr uint64_t PRESET_VALUE_7_SDIO1 = SDIO1_BASE + PRESET_VALUE_7;
+	constexpr uint64_t PRESET_VALUE_8_SDIO0 = SDIO0_BASE + PRESET_VALUE_8;
+	constexpr uint64_t PRESET_VALUE_8_SDIO1 = SDIO1_BASE + PRESET_VALUE_8;
+
+	/** Physical address of the Integrated Descriptor ADMA3 reads to start a
+	*  transfer — writing this register is what triggers ADMA3, the same role
+	*  the Command register plays for a normal command. One 64-bit register
+	*  held as two 32-bit halves; only relevant when DMA Select in Host
+	*  Control 1 selects ADMA3. */
+	constexpr uint64_t ADMA3_ID_ADDRESS_LOW  = 0x078;
+	constexpr uint64_t ADMA3_ID_ADDRESS_HIGH = 0x07C;
+	constexpr uint64_t ADMA3_ID_ADDRESS_LOW_SDIO0  = SDIO0_BASE + ADMA3_ID_ADDRESS_LOW;
+	constexpr uint64_t ADMA3_ID_ADDRESS_LOW_SDIO1  = SDIO1_BASE + ADMA3_ID_ADDRESS_LOW;
+	constexpr uint64_t ADMA3_ID_ADDRESS_HIGH_SDIO0 = SDIO0_BASE + ADMA3_ID_ADDRESS_HIGH;
+	constexpr uint64_t ADMA3_ID_ADDRESS_HIGH_SDIO1 = SDIO1_BASE + ADMA3_ID_ADDRESS_HIGH;
+
+
+/** Address for the Host Controller Version Register.
+ */
+
+constexpr uint64_t HOST_CONTROLLER_VERSION_REGISTER = 0xFE;
+constexpr uint64_t HOST_CONTROLLER_VERSION_SDIO0 = SDIO0_BASE + HOST_CONTROLLER_VERSION_REGISTER;
+constexpr uint64_t HOST_CONTROLLER_VERSION_SDIO1 = SDIO1_BASE + HOST_CONTROLLER_VERSION_REGISTER;
+
+/** RP1's dedicated SDIO clock-generator IP (compatible "raspberrypi,rp1-sdio-clk"
+ *  in Raspberry Pi's own Linux kernel source, drivers/clk/clk-rp1-sdio.c) —
+ *  a hardware block entirely separate from the SDHCI-standard register set
+ *  above, responsible for actually deriving the SD_CLK signal sent to the
+ *  physical card. Its CS (Control/Status) register's reset bit defaults to
+ *  1 (held in reset) at power-on — no clock reaches the bus at all, no
+ *  matter what the SDHCI Clock Control register (offset 0x02C) claims,
+ *  until this block is explicitly taken out of reset. Addresses translated
+ *  the same way as SDIO0_BASE/SDIO1_BASE above (RP1-internal offset minus
+ *  0x40000000, plus PERIPHERAL_BASE); reg property confirmed against
+ *  rp1.dtsi ("sdio_clk0@b0004" / "sdio_clk1@b4004"). All registers in this
+ *  block are genuinely 32-bit (Linux's own driver uses readl/writel
+ *  throughout), unlike the mixed-width SDHCI block above. */
+constexpr uint64_t SDIO0_CLKGEN_BASE = PERIPHERAL_BASE + (0x400b0004 - 0x40000000);
+constexpr uint64_t SDIO1_CLKGEN_BASE = PERIPHERAL_BASE + (0x400b4004 - 0x40000000);
+
+constexpr uint64_t SDIO_CLKGEN_MODE      = 0x00;
+constexpr uint64_t SDIO_CLKGEN_LOCAL     = 0x08;
+constexpr uint64_t SDIO_CLKGEN_USE_LOCAL = 0x0C;
+constexpr uint64_t SDIO_CLKGEN_SD_DELAY  = 0x10;
+constexpr uint64_t SDIO_CLKGEN_RX_DELAY  = 0x14;
+constexpr uint64_t SDIO_CLKGEN_CS        = 0x1C;
+
+constexpr uint64_t SDIO_CLKGEN_MODE_SDIO0      = SDIO0_CLKGEN_BASE + SDIO_CLKGEN_MODE;
+constexpr uint64_t SDIO_CLKGEN_LOCAL_SDIO0     = SDIO0_CLKGEN_BASE + SDIO_CLKGEN_LOCAL;
+constexpr uint64_t SDIO_CLKGEN_USE_LOCAL_SDIO0 = SDIO0_CLKGEN_BASE + SDIO_CLKGEN_USE_LOCAL;
+constexpr uint64_t SDIO_CLKGEN_SD_DELAY_SDIO0  = SDIO0_CLKGEN_BASE + SDIO_CLKGEN_SD_DELAY;
+constexpr uint64_t SDIO_CLKGEN_RX_DELAY_SDIO0  = SDIO0_CLKGEN_BASE + SDIO_CLKGEN_RX_DELAY;
+constexpr uint64_t SDIO_CLKGEN_CS_SDIO0        = SDIO0_CLKGEN_BASE + SDIO_CLKGEN_CS;
+
+constexpr uint64_t SDIO_CLKGEN_MODE_SDIO1      = SDIO1_CLKGEN_BASE + SDIO_CLKGEN_MODE;
+constexpr uint64_t SDIO_CLKGEN_LOCAL_SDIO1     = SDIO1_CLKGEN_BASE + SDIO_CLKGEN_LOCAL;
+constexpr uint64_t SDIO_CLKGEN_USE_LOCAL_SDIO1 = SDIO1_CLKGEN_BASE + SDIO_CLKGEN_USE_LOCAL;
+constexpr uint64_t SDIO_CLKGEN_SD_DELAY_SDIO1  = SDIO1_CLKGEN_BASE + SDIO_CLKGEN_SD_DELAY;
+constexpr uint64_t SDIO_CLKGEN_RX_DELAY_SDIO1  = SDIO1_CLKGEN_BASE + SDIO_CLKGEN_RX_DELAY;
+constexpr uint64_t SDIO_CLKGEN_CS_SDIO1        = SDIO1_CLKGEN_BASE + SDIO_CLKGEN_CS;

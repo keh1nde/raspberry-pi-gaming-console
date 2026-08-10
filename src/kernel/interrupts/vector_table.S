@@ -146,6 +146,10 @@ vector_table:
 
 sync_handler:
     save_registers
+    // Pass the saved-frame base to the C handler (AAPCS64: 1st arg in x0) so
+    // it can read the caller's x30/LR — x0's pre-exception value is already
+    // safe in the frame at [SP, #0] and gets restored from there regardless.
+    mov x0, SP
     bl handle_synchronous_interrupts
     load_registers
     eret
