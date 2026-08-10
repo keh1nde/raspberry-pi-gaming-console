@@ -1,7 +1,19 @@
 /**
  * @file sd.cpp
  * @brief SD card driver implementation — SDHCI register-level init, read,
- *  and write logic for the RP1's SDIO controller.
+ *  and write logic for BCM2712's native SDHCI controller, the one actually
+ *  wired to this board's physical microSD card slot.
+ *
+ * This driver originally targeted RP1's own SDIO0 block, which is real,
+ * spec-compliant silicon but — as discovered via a persistent "CMD line
+ * conflict" signature on every command, including CMD0 — simply isn't
+ * connected to the card slot on this board at all. See
+ * p-docs/claude-notes/bcm2712-sdhci-migration-notes.md for the full story
+ * and sources; the protocol-level logic below (command issuance, Present
+ * State polling, interrupt status handling) is unchanged from that
+ * RP1-targeted, hardware-verified-up-to-CMD8 version — only the register
+ * base and a small BCM2712-specific bring-up sequence (pinctrl pull-ups,
+ * the vendor "cfg" register) are new.
  *
  * Part of raspberry-pi-gaming-console, a retro gaming console OS.
  *
@@ -65,76 +77,44 @@ bool _sdio_wait_clock_stable() {
 }
 
 /**
- * @brief One-time bring-up for RP1's dedicated SDIO clock-generator IP —
- *  see board.h's SDIO_CLKGEN_* comment for why this block exists at all.
- *  Mirrors Linux's rp1_sdio_clk_init() (drivers/clk/clk-rp1-sdio.c)
- *  exactly, since none of this is documented in the SD Host Controller
- *  spec — it's entirely an RP1-specific requirement layered underneath it.
+ * @brief One-time BCM2712-specific bring-up: enables internal pull-ups on
+ *  EMMC_CMD/DAT0-3 via BCM2712's own pinctrl block.
  *
- * The source clock is a fixed 1GHz "PLL sys VCO" on real hardware (per
- * rp1.dtsi's sdio_src node — 400MHz only on Raspberry Pi's own FPGA
- * validation boards, irrelevant here), and the block derives from that a
- * fixed 50MHz reference (sdhci_core — the same 50MHz already assumed as
- * the Capabilities-Base-Clock-Frequency fallback in _sdio_clock_init()),
- * giving a fixed 1000MHz/50MHz = 20 steps-per-cycle Mode encoding. This is
- * unrelated to the actual SD_CLK divisor, which Local's Freq Sel field
- * controls instead — see _sdio_clkgen_set_rate(). RX/SD delay values are
- * Raspberry Pi's own documented defaults for meeting the SD bus's
- * tISU/tIH timing margins in high-speed mode; this driver doesn't do its
- * own tuning, so there's no reason to deviate from them.
+ * A real prerequisite, not polish: without a pull-up, the CMD line has no
+ * defined idle-high state and can float/sag low the instant nothing is
+ * actively driving it — the leading hypothesis for the spec-documented
+ * "CMD line conflict" signature (Host Controller spec §2.2.18: driving
+ * high but reading back low) hit on every command while this driver was
+ * still targeting RP1's SDIO0, whose own pins have entirely separate pull
+ * config. See board.h's PINCTRL_EMMC_PULL_REG comment and
+ * p-docs/claude-notes/bcm2712-sdhci-migration-notes.md for the full
+ * per-pin bit-offset derivation. Read-modify-write, since EMMC_CLK/
+ * EMMC_DS share this register and must be left alone.
  */
-void _sdio_clkgen_init() {
- // Assert reset while reconfiguring. Reset (bit 0) is CS's only writable
- // field, so writing the raw bit value is equivalent to a read-modify-write.
- mmio_write(SDIO_CLKGEN_CS_SDIO0, 1U); // CS_RESET = 1.
-
- // Mode: Src Sel = PLL_SYS_VCO (bits[17:16] = 10b); Steps Per Cycle = the
- // "20 steps" encoding (bits[30:28] = 000b, i.e. left at 0) — 1GHz source
- // / 50MHz base = 20 steps/cycle exactly.
- mmio_write(SDIO_CLKGEN_MODE_SDIO0, (0x2U << 16));
-
- // RX Delay: Overflow = Clamp (bits[13:12] = 01b), Map = Stretch
- // (bits[9:8] = 10b), Fixed = 6 (bits[4:0]).
- mmio_write(SDIO_CLKGEN_RX_DELAY_SDIO0, (0x1U << 12) | (0x2U << 8) | 0x6U);
-
- // SD Delay: Steps = 5 (bits[4:0]).
- mmio_write(SDIO_CLKGEN_SD_DELAY_SDIO0, 0x5U);
-
- // Use Local: for each of Freq Sel / Card Clk Enable / Clk2Card On /
- // Clk Gen Sel, select this generator's own Local register as the active
- // source (as opposed to letting the SDHCI IP itself, "FromIP", drive
- // them) — bits 0, 16, 18, 12 respectively. Local itself is left
- // untouched here — _sdio_clkgen_set_rate() configures it per target rate.
- mmio_write(SDIO_CLKGEN_USE_LOCAL_SDIO0,
-  (1U << 0) | (1U << 16) | (1U << 18) | (1U << 12));
-
- // Deassert reset — again CS's only writable bit.
- mmio_write(SDIO_CLKGEN_CS_SDIO0, 0U);
+void _sdio_pinctrl_init() {
+ uint32_t pull_reg = mmio_read(PINCTRL_EMMC_PULL_REG);
+ pull_reg = (pull_reg & ~PINCTRL_EMMC_CMD_DAT_MASK) | PINCTRL_EMMC_CMD_DAT_PULLUP;
+ mmio_write(PINCTRL_EMMC_PULL_REG, pull_reg);
 }
 
 /**
- * @brief Programs RP1's SDIO clock-generator Local register to actually
- *  drive SD_CLK at the given rate, and turns the generator's card-facing
- *  clock on. Mirrors Linux's rp1_sdio_clk_set_rate() exactly.
+ * @brief Selects SD (not eMMC) pin timing in BCM2712's vendor "cfg"
+ *  register block.
  *
- * Must run after _sdio_clkgen_init() (which selects this register as the
- * generator's active source via Use Local, but never writes it itself).
- * This driver only ever runs the SD bus at the fixed identification-phase
- * rate — any future higher-speed support would need to call this again
- * alongside whatever recomputes the SDHCI-side Clock Control divisor,
- * since the two divisors are independent and not kept in sync
- * automatically.
- *
- * @param target_hz Desired SD_CLK rate in Hz — must not exceed the 50MHz
- *  base rate this generator derives from.
+ * Per Linux's sdhci_bcm2712_set_clock() (drivers/mmc/host/sdhci-brcmstb.c),
+ * this must be written every time the SD clock is (re)configured,
+ * alongside the standard Clock Control sequence — an SDHCI-spec-external
+ * requirement layered underneath it, the BCM2712 equivalent of what RP1's
+ * clock-generator bring-up used to be for the (now unused) RP1-targeted
+ * path. This driver only ever configures the clock once, at the fixed
+ * identification-phase rate, so one call from _sdio_clock_init() covers
+ * it. Read-modify-write, since this register's other bits are reserved
+ * for features (UHS/HS-eMMC/CQE) this driver doesn't implement.
  */
-void _sdio_clkgen_set_rate(uint32_t target_hz) {
- const uint32_t div = (50000000U / target_hz) - 1U;
-
- // Clk Gen Sel = 1 (Div Clock Mode, bit 12), Card Clk Enable = 1
- // (bit 16), Clk2Card On = 1 (bit 18), Freq Sel = div (bits[9:0]).
- mmio_write(SDIO_CLKGEN_LOCAL_SDIO0,
-  (1U << 12) | (1U << 16) | (1U << 18) | (div & 0x3FFU));
+void _sdio_cfg_select_sd_pin_timing() {
+ uint32_t pin_sel = mmio_read(SDIO_CFG_SD_PIN_SEL);
+ pin_sel = (pin_sel & ~SDIO_CFG_SD_PIN_SEL_MASK) | SDIO_CFG_SD_PIN_SEL_SD;
+ mmio_write(SDIO_CFG_SD_PIN_SEL, pin_sel);
 }
 
 /**
@@ -171,22 +151,22 @@ bool _sdio_clock_init() {
   }
  }
 
- // Bring up RP1's separate SDIO clock-generator block and drive it at the
- // same 400kHz identification rate the SDHCI-side divisor below targets —
- // see board.h's SDIO_CLKGEN_* comment and _sdio_clkgen_init()'s docstring
- // for why this is a completely separate requirement from everything else
- // in this function. Unlike Software Reset For All above, this has nothing
- // to do with card detection or the SDHCI IP itself, so it can safely run
- // first. (Isolation-tested 2026-08-10: disabling this did not change the
- // CMD0 hang, and the earlier "whole SDIO0 block reads zero" scare that
- // prompted the test turned out to be a stale-debug-session artifact, not
- // caused by this code — re-enabled.)
- _sdio_clkgen_init();
- _sdio_clkgen_set_rate(400000);
+ // One-time BCM2712-specific bring-up: internal pull-ups on EMMC_CMD/
+ // DAT0-3 (pinctrl) and SD-vs-eMMC pin timing select ("cfg" register) —
+ // see _sdio_pinctrl_init()/_sdio_cfg_select_sd_pin_timing()'s docstrings.
+ // Neither has anything to do with card detection or the SDHCI IP itself,
+ // so both can safely run before card detection, same as the RP1
+ // clock-generator bring-up they replace used to.
+ _sdio_pinctrl_init();
+ _sdio_cfg_select_sd_pin_timing();
 
  // Detect Card
  card_inserted = (mmio_read(PRESENT_STATE_SDIO0) >> 16) & 1;
- if (card_inserted == 0) return false; // No card inserted.
+ if (card_inserted == 0) {
+  uart_puts("[SDIO] error: Card Inserted bit reads 0; no card detected"
+            " (or card-detect logic is wrong for this controller).\r\n");
+  return false; // No card inserted.
+ }
 
  // Read capabilities register for SD card details.
  const uint32_t capabilities = mmio_read(CAPABILITIES1_SDIO0);
@@ -235,19 +215,21 @@ bool _sdio_clock_init() {
   uart_puts("[SDIO] warning: BCF may not be supported,"
             " or sdio_init implementation is incorrect.");
 
- // RP1's SDIO/SDHCI controller never reports Base Clock Frequency via
- // CAPABILITIES (always 0) — the real base clock lives one layer down,
- // in RP1's own dedicated SD clock-generator IP (clk-rp1-sdio.c),
- // fixed at 50MHz via the "sdhci_core" clock in rp1.dtsi, and matching
- // the RP1 peripherals datasheet's stated max controller speed
- // (HS50/DDR50, 50MHz). This is the spec's own anticipated fallback
- // path (Host Controller spec §3.6, Figure 3-3, step (1)): "If Base
- // Clock Frequency... is 0, the Host System shall provide this
- // information... by another method" — RP1 is that case.
+ // BCM2712's native SDHCI controller is fed by clk_emmc2, a plain fixed
+ // 200MHz clock (bcm2712.dtsi) — unlike RP1's own SDIO0/SDIO1, which
+ // always report 0 here due to an explicit SDHCI_QUIRK_CAP_CLOCK_BASE_
+ // BROKEN pdata quirk declared only against RP1's variant in Linux's
+ // sdhci-of-dwcmshc.c. sdhci-brcmstb.c declares no equivalent quirk for
+ // BCM2712, so Capabilities should self-report 200 correctly in practice.
+ // This fallback is kept anyway — both because the spec itself
+ // anticipates a Base Clock Frequency of 0 (§3.6, Figure 3-3, step (1):
+ // "the Host System shall provide this information... by another
+ // method") and because which path this controller actually takes
+ // hasn't yet been confirmed on real hardware.
  if (base_clock_mhz == 0) {
-  uart_puts("[SDIO] Base Clock Frequency read as 0; using RP1's known"
-            " fixed 50MHz SD clock-generator output.\r\n");
-  base_clock_mhz = 50;
+  uart_puts("[SDIO] Base Clock Frequency read as 0; using BCM2712's known"
+            " fixed 200MHz clk_emmc2 clock.\r\n");
+  base_clock_mhz = 200;
  }
 
  base_clock = static_cast<uint64_t>(base_clock_mhz) * 1000000ULL;
@@ -782,9 +764,19 @@ bool _sdio_identify_stage1(int* f8) {
 
   // Voltage and check pattern must match.
   // Mismatched voltage/check pattern indicates an unusable card.
-  // See SD Assoc Physical Layer Spec, Figure 4-2.
-  const uint32_t voltage_accepted = (response >> 16) & 0xF;
-  const uint32_t echoed_pattern = (response >> 8) & 0xFF;
+  // See SD Assoc Physical Layer Spec, Figure 4-2. CMD8's R7 response packs
+  // the voltage-accepted echo into bits [11:8] and the check-pattern echo
+  // into bits [7:0] — the shifts below were previously off by 8 bits
+  // (>>16/>>8, as if voltage lived at [19:16]), a latent bug never
+  // reachable until this session's controller retarget, since CMD8 never
+  // got a real Command Complete before (see the migration notes' "CMD
+  // line conflict" section). Caught on real hardware 2026-08-10: a
+  // correctly-echoing response (0x1AA, matching the 0x1AA sent) was
+  // misread as voltage_accepted=0/echoed_pattern=0x1 and rejected as an
+  // "Unusable Card".
+  const uint32_t voltage_accepted = (response >> 8) & 0xF;
+  const uint32_t echoed_pattern = response & 0xFF;
+
   return voltage_accepted == 0b0001 && echoed_pattern == 0xAA;
  }
 

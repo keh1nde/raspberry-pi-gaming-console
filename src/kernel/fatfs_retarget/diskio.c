@@ -33,11 +33,18 @@ static DSTATUS init_status = STA_NOINIT;
 DSTATUS disk_status(BYTE pdrv) {
 	if (pdrv != DEV_SD) return STA_NOINIT;
 
-	if (init_status == STA_NOINIT && card_inserted == 0)
+	// Only card removal should force re-initialization. The previous
+	// `else if (card_inserted == 1) init_status = STA_NOINIT;` branch
+	// unconditionally clobbered a successful disk_initialize() back to
+	// STA_NOINIT on every single status check as long as a card was
+	// present — which is effectively always, once mounted — forcing
+	// FatFs to silently re-run sdio_init() from inside f_open()/f_write(),
+	// reassigning a fresh RCA and reselecting the card mid-operation.
+	// Found on real hardware 2026-08-10: the SD self-test's f_write()
+	// failed immediately after a second, spurious full re-init sequence
+	// appeared in the boot log right after a successful mount.
+	if (card_inserted == 0)
 		init_status = STA_NOINIT | STA_NODISK;
-
-	else if (card_inserted == 1)
-		init_status = STA_NOINIT;
 
 	return init_status;
 }

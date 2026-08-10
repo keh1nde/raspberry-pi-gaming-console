@@ -238,17 +238,36 @@ void mmu_init() {
 
 	asm volatile("msr TTBR0_EL1, %0" :: "r"(page_table_address));
 
-	// Identity-map the five regions the kernel needs post-MMU:
+	// Identity-map the regions the kernel needs post-MMU:
 	//   1. Low RAM (stack region, grows down from 0x80000).
 	//   2. Kernel + bitmap (kernel image up to phys_mem_start).
 	//   3. Free RAM (the region the PMM hands out — page tables live here).
-	//   4. BCM2712 peripheral block.
-	//   5. ARM local peripherals (different L1 entry than the rest).
+	//   4. RP1 peripheral block (PCIe-BAR window).
+	//   5. ARM local peripherals (GIC-400; different L1 entry than the rest).
+	//   6. BCM2712's native SDHCI host+cfg registers (SDIO0_BASE).
+	//   7. BCM2712's main pinctrl block (EMMC pull-up config).
 	map(0x00000000, 0x00000000, 0x00080000, PTE_NORMAL_RW);
 	map(0x00080000, 0x00080000, phys_mem_start - 0x80000, PTE_NORMAL_RW);
 	map(phys_mem_start, phys_mem_start, PHYS_MEM_END - phys_mem_start, PTE_NORMAL_RW);
 	map(PERIPHERAL_BASE, PERIPHERAL_BASE, 0x410000, PTE_DEVICE_RW);
 	map(LOCAL_PERIPHERAL_BASE, LOCAL_PERIPHERAL_BASE, 0x8000, PTE_DEVICE_RW);
+
+	// SDIO0_BASE (0x1000fff000) is already page-aligned; one page covers
+	// both the "host" register window (0x000-0x260) and the "cfg" window
+	// (0x400-0x600) the SD driver touches — both fit inside the first
+	// 0x1000 bytes. Neither of the two mappings above cover this: it's
+	// BCM2712-native address space, a different translation scheme
+	// entirely from RP1's PCIe-BAR window (PERIPHERAL_BASE) and a
+	// different block from the GIC-400's own BCM2712-native range
+	// (LOCAL_PERIPHERAL_BASE) — see SDIO0_BASE's comment in board.h.
+	map(SDIO0_BASE, SDIO0_BASE, PAGE_SIZE, PTE_DEVICE_RW);
+
+	// PINCTRL_BASE (0x107d504100) is not page-aligned (0x100 into its
+	// page) — round down to the containing page. One page still covers
+	// the pull-config register this driver actually writes
+	// (PINCTRL_EMMC_PULL_REG = PINCTRL_BASE + 0x2C = 0x107d50412c).
+	constexpr uint64_t PINCTRL_PAGE_BASE = PINCTRL_BASE & ~(PAGE_SIZE - 1);
+	map(PINCTRL_PAGE_BASE, PINCTRL_PAGE_BASE, PAGE_SIZE, PTE_DEVICE_RW);
 
 
 	// SCTLR_EL1: flip M (MMU on), C (data cache on), I (instruction

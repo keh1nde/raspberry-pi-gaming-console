@@ -258,10 +258,101 @@
 	 */
 	// TODO: Write docstring when complete.
 
-	// Two identical MSHC instances; only one is wired to the physical microSD
-	// slot on this board, per the RP1 peripherals datasheet.
-	constexpr uint64_t SDIO0_BASE = PERIPHERAL_BASE + (0x40180000 - 0x40000000);
+	/**
+	 * SDIO0_BASE — CPU physical 0x1000fff000.
+	 *
+	 * Points at BCM2712's own native SDHCI controller (`sdio1: mmc@fff000`,
+	 * `compatible = "brcm,bcm2712-sdhci", "brcm,sdhci-brcmstb"` in
+	 * bcm2712.dtsi) — the controller actually wired to this board's
+	 * physical microSD card slot, per the retail board DTS's own comment
+	 * on its `&sdio1` node: "SDIO1 is used to drive the SD card".
+	 *
+	 * This was NOT the original target: every register offset below was
+	 * first built and hardware-verified against RP1's own `SDIO0` block
+	 * (real, functional silicon at PERIPHERAL_BASE + 0x180000) before
+	 * discovering — via a persistent, spec-matching "CMD line conflict"
+	 * signature on every command, including CMD0 — that RP1's SDIO0/SDIO1
+	 * are simply not connected to this board's card slot at all. Full
+	 * derivation, sources, and the address-translation formula below:
+	 * p-docs/claude-notes/bcm2712-sdhci-migration-notes.md.
+	 *
+	 * Address translation is different from RP1's PCIe-BAR-window scheme
+	 * (PERIPHERAL_BASE + rp1-internal-offset): bcm2712.dtsi's root
+	 * simple-bus node declares `ranges = <0x0 0x10 0x0 0x80000000>`, so any
+	 * child address X in [0, 0x80000000) maps to real physical
+	 * `0x1000000000 + X`. Cross-checked against this project's own
+	 * already-hardware-confirmed LOCAL_PERIPHERAL_BASE (GIC-400): the
+	 * devicetree's own `gicv2@7fff9000` node translates via this exact
+	 * formula to 0x107FFF9000, which matches GICD_BASE
+	 * (LOCAL_PERIPHERAL_BASE + 0x1000) exactly — same mechanism,
+	 * independently verified against a peripheral already proven correct
+	 * on real hardware, not just re-derived from the same devicetree
+	 * source in isolation.
+	 *
+	 * `sdio1`'s `reg` property is two windows: `<0x00fff000 0x260>` (the
+	 * standard SDHCI "host" registers every offset below still targets —
+	 * same spec, same offsets, only the base changed) and
+	 * `<0x00fff400 0x200>` (a small BCM2712-specific "cfg" extension block
+	 * — see SDHCI_CFG_BASE below).
+	 */
+	constexpr uint64_t SDIO0_BASE = 0x1000fff000;
+
+	/** RP1's second SDIO instance (`rp1_mmc1`) — like RP1's SDIO0, real
+	 *  silicon but not wired to this board's card slot. Unused by this
+	 *  driver; kept only so the register-offset constants below that are
+	 *  derived from it still compile if anything ever needs to probe RP1's
+	 *  side directly. */
 	constexpr uint64_t SDIO1_BASE = PERIPHERAL_BASE + (0x40184000 - 0x40000000);
+
+	/**
+	 * BCM2712 "cfg" vendor register block — CPU physical 0x1000fff400.
+	 * The second `reg` window on the `sdio1` devicetree node (see
+	 * SDIO0_BASE above), separate from the standard SDHCI "host" registers.
+	 */
+	constexpr uint64_t SDHCI_CFG_BASE = SDIO0_BASE + 0x400;
+
+	/**
+	 * SD vs eMMC pin-timing select — CPU physical 0x1000fff444.
+	 *
+	 * Per Linux's sdhci_bcm2712_set_clock() (drivers/mmc/host/sdhci-
+	 * brcmstb.c), this must be written every time the SD clock is
+	 * (re)configured, alongside the standard Clock Control sequence. This
+	 * driver never does eMMC/HS-eMMC timings, so it's always written as SD
+	 * (bit 1), never MMC (bit 0).
+	 */
+	constexpr uint64_t SDIO_CFG_SD_PIN_SEL      = SDHCI_CFG_BASE + 0x44;
+	constexpr uint32_t SDIO_CFG_SD_PIN_SEL_MMC  = (1U << 0);
+	constexpr uint32_t SDIO_CFG_SD_PIN_SEL_SD   = (1U << 1);
+	constexpr uint32_t SDIO_CFG_SD_PIN_SEL_MASK = 0x3U;
+
+	/**
+	 * BCM2712 main pinctrl block — CPU physical 0x107d504100.
+	 *
+	 * `pinctrl@7d504100`, `compatible = "brcm,bcm2712c0-pinctrl"` — the
+	 * retail board's C0 silicon stepping, confirmed directly from its own
+	 * devicetree node (pinctrl-brcmstb-bcm2712.c defines two incompatible
+	 * register tables for C0 vs D0; using the wrong one would silently
+	 * target the wrong pins entirely). Holds the pull-up/down
+	 * configuration for `emmc_cmd`/`emmc_dat0-3` — a subsystem the
+	 * RP1-targeted driver never had to touch, since RP1's own pins have
+	 * entirely separate pull config. Without a pull-up here, the CMD line
+	 * has no defined idle-high state and can float/sag low the instant
+	 * nothing is actively driving it — the leading hypothesis for the
+	 * "drove CMD high, read back low" CMD-line-conflict signature every
+	 * RP1-targeted command hit; see the migration notes for the full
+	 * per-pin bit-offset derivation.
+	 */
+	constexpr uint64_t PINCTRL_BASE = 0x107d504100;
+
+	/** EMMC_CMD/DAT0-3 pull-config register — CPU physical 0x107d50412c.
+	 *  All five pins pack into this one 32-bit register, 2 bits each
+	 *  (00=none, 01=pull-down, 10=pull-up); EMMC_CLK and EMMC_DS share the
+	 *  register but are deliberately left alone (CLK is host-driven, DS is
+	 *  an eMMC-only HS400 signal irrelevant to plain SD cards) — hence the
+	 *  read-modify-write mask below instead of a blind overwrite. */
+	constexpr uint64_t PINCTRL_EMMC_PULL_REG       = PINCTRL_BASE + 0x2C;
+	constexpr uint32_t PINCTRL_EMMC_CMD_DAT_MASK   = 0xFF0CU; // CMD/DAT0-3's five 2-bit fields (bits 2-3,8-9,10-11,12-13,14-15).
+	constexpr uint32_t PINCTRL_EMMC_CMD_DAT_PULLUP = 0xAA08U; // Same five fields, each set to 10b (pull-up).
 
 	/**
 	* SDMA System Address (default) or 32-bit Block Count (only if Host
@@ -561,37 +652,14 @@ constexpr uint64_t HOST_CONTROLLER_VERSION_SDIO1 = SDIO1_BASE + HOST_CONTROLLER_
 
 /** RP1's dedicated SDIO clock-generator IP (compatible "raspberrypi,rp1-sdio-clk"
  *  in Raspberry Pi's own Linux kernel source, drivers/clk/clk-rp1-sdio.c) —
- *  a hardware block entirely separate from the SDHCI-standard register set
- *  above, responsible for actually deriving the SD_CLK signal sent to the
- *  physical card. Its CS (Control/Status) register's reset bit defaults to
- *  1 (held in reset) at power-on — no clock reaches the bus at all, no
- *  matter what the SDHCI Clock Control register (offset 0x02C) claims,
- *  until this block is explicitly taken out of reset. Addresses translated
- *  the same way as SDIO0_BASE/SDIO1_BASE above (RP1-internal offset minus
+ *  needed only for RP1's own SDIO0/SDIO1 blocks, which turned out not to be
+ *  wired to this board's card slot at all (see SDIO0_BASE's comment).
+ *  BCM2712's native SDHCI controller (the one actually in use) is fed by
+ *  `clk_emmc2`, a plain fixed 200MHz clock with no equivalent
+ *  bring-out-of-reset step — so this block is no longer part of the active
+ *  driver. Left defined here for reference only; addresses translated the
+ *  same way as the old SDIO0_BASE/SDIO1_BASE (RP1-internal offset minus
  *  0x40000000, plus PERIPHERAL_BASE); reg property confirmed against
- *  rp1.dtsi ("sdio_clk0@b0004" / "sdio_clk1@b4004"). All registers in this
- *  block are genuinely 32-bit (Linux's own driver uses readl/writel
- *  throughout), unlike the mixed-width SDHCI block above. */
-constexpr uint64_t SDIO0_CLKGEN_BASE = PERIPHERAL_BASE + (0x400b0004 - 0x40000000);
-constexpr uint64_t SDIO1_CLKGEN_BASE = PERIPHERAL_BASE + (0x400b4004 - 0x40000000);
-
-constexpr uint64_t SDIO_CLKGEN_MODE      = 0x00;
-constexpr uint64_t SDIO_CLKGEN_LOCAL     = 0x08;
-constexpr uint64_t SDIO_CLKGEN_USE_LOCAL = 0x0C;
-constexpr uint64_t SDIO_CLKGEN_SD_DELAY  = 0x10;
-constexpr uint64_t SDIO_CLKGEN_RX_DELAY  = 0x14;
-constexpr uint64_t SDIO_CLKGEN_CS        = 0x1C;
-
-constexpr uint64_t SDIO_CLKGEN_MODE_SDIO0      = SDIO0_CLKGEN_BASE + SDIO_CLKGEN_MODE;
-constexpr uint64_t SDIO_CLKGEN_LOCAL_SDIO0     = SDIO0_CLKGEN_BASE + SDIO_CLKGEN_LOCAL;
-constexpr uint64_t SDIO_CLKGEN_USE_LOCAL_SDIO0 = SDIO0_CLKGEN_BASE + SDIO_CLKGEN_USE_LOCAL;
-constexpr uint64_t SDIO_CLKGEN_SD_DELAY_SDIO0  = SDIO0_CLKGEN_BASE + SDIO_CLKGEN_SD_DELAY;
-constexpr uint64_t SDIO_CLKGEN_RX_DELAY_SDIO0  = SDIO0_CLKGEN_BASE + SDIO_CLKGEN_RX_DELAY;
-constexpr uint64_t SDIO_CLKGEN_CS_SDIO0        = SDIO0_CLKGEN_BASE + SDIO_CLKGEN_CS;
-
-constexpr uint64_t SDIO_CLKGEN_MODE_SDIO1      = SDIO1_CLKGEN_BASE + SDIO_CLKGEN_MODE;
-constexpr uint64_t SDIO_CLKGEN_LOCAL_SDIO1     = SDIO1_CLKGEN_BASE + SDIO_CLKGEN_LOCAL;
-constexpr uint64_t SDIO_CLKGEN_USE_LOCAL_SDIO1 = SDIO1_CLKGEN_BASE + SDIO_CLKGEN_USE_LOCAL;
-constexpr uint64_t SDIO_CLKGEN_SD_DELAY_SDIO1  = SDIO1_CLKGEN_BASE + SDIO_CLKGEN_SD_DELAY;
-constexpr uint64_t SDIO_CLKGEN_RX_DELAY_SDIO1  = SDIO1_CLKGEN_BASE + SDIO_CLKGEN_RX_DELAY;
-constexpr uint64_t SDIO_CLKGEN_CS_SDIO1        = SDIO1_CLKGEN_BASE + SDIO_CLKGEN_CS;
+ *  rp1.dtsi ("sdio_clk0@b0004" / "sdio_clk1@b4004"). */
+constexpr uint64_t RP1_SDIO0_CLKGEN_BASE = PERIPHERAL_BASE + (0x400b0004 - 0x40000000);
+constexpr uint64_t RP1_SDIO1_CLKGEN_BASE = PERIPHERAL_BASE + (0x400b4004 - 0x40000000);
