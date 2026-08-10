@@ -34,7 +34,7 @@ struct inode;
 
 /** Size of one storage block, in bytes. Matches `PAGE_SIZE` so each block
  *  consumes exactly one heap-allocated chunk. */
-constexpr uint64_t BLOCK_SIZE = 4096;
+constexpr uint64_t FILE_BLOCK_SIZE = 4096;
 
 /** Maximum filename length in characters (not counting the null terminator). */
 constexpr uint64_t MAX_SIZE = 255;
@@ -58,7 +58,7 @@ inline inode* inode_list_head = nullptr;
  */
 struct block {
 	block_t* next;
-	uint8_t data[BLOCK_SIZE - sizeof(block_t*)];
+	uint8_t data[FILE_BLOCK_SIZE - sizeof(block_t*)];
 };
 
 /**
@@ -87,7 +87,7 @@ struct dirent {
 	char name[MAX_SIZE + 1];
 };
 
-// 15 dirents must fit in one block (BLOCK_SIZE - sizeof(block_t*) = 4088)
+// 15 dirents must fit in one block (FILE_BLOCK_SIZE - sizeof(block_t*) = 4088)
 // Thus each dirent must be 264 bytes.
 static_assert(sizeof(dirent) == 264);
 

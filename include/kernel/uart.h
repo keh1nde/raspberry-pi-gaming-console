@@ -7,8 +7,10 @@
  *
  * Exposes the BCM2835's PL011 UART as a kernel-wide console. Boot logging,
  * panic messages, and the interactive shell all funnel through this module.
- * Inline `mmio_read`/`mmio_write` helpers double as the generic MMIO accessors
- * used by every other driver (timer, IRQ controller, etc.).
+ * Inline `mmio_read`/`mmio_write` helpers (plus `mmio_read16`/`mmio_write16`
+ * and `mmio_read8`/`mmio_write8` for registers narrower than 32 bits) double
+ * as the generic MMIO accessors used by every other driver (timer, IRQ
+ * controller, etc.).
  *
  * References:
  *   - ARM PrimeCell UART (PL011) Technical Reference Manual (ARM DDI 0183)
@@ -23,7 +25,7 @@
 #include <stdint.h>
 
 /**
- * @brief Write a 64-bit value to a memory-mapped I/O register.
+ * @brief Write a 32-bit value to a memory-mapped I/O register.
  *
  * The `volatile` cast forbids the compiler from coalescing or reordering this
  * store with adjacent memory accesses — required for any device register.
@@ -37,7 +39,7 @@ static inline void mmio_write(uint64_t reg, uint32_t data)
 }
 
 /**
- * @brief Read a 64-bit value from a memory-mapped I/O register.
+ * @brief Read a 32-bit value from a memory-mapped I/O register.
  *
  * @param reg Physical address of the MMIO register.
  * @return The current 32-bit value at @p reg.
@@ -45,6 +47,60 @@ static inline void mmio_write(uint64_t reg, uint32_t data)
 static inline uint32_t mmio_read(uint64_t reg)
 {
 	return *reinterpret_cast<volatile uint32_t*>(reg);
+}
+
+/**
+ * @brief Write a 16-bit value to a memory-mapped I/O register.
+ *
+ * Same `volatile`-access contract as #mmio_write, narrowed to a halfword —
+ * for registers documented as 16-bit wide rather than folded into a 32-bit
+ * access (e.g. SDHCI's Clock Control register).
+ *
+ * @param reg  Physical address of the MMIO register.
+ * @param data 16-bit value to store.
+ */
+static inline void mmio_write16(uint64_t reg, uint16_t data)
+{
+	*reinterpret_cast<volatile uint16_t*>(reg) = data;
+}
+
+/**
+ * @brief Read a 16-bit value from a memory-mapped I/O register.
+ *
+ * @param reg Physical address of the MMIO register.
+ * @return The current 16-bit value at @p reg.
+ */
+static inline uint16_t mmio_read16(uint64_t reg)
+{
+	return *reinterpret_cast<volatile uint16_t*>(reg);
+}
+
+/**
+ * @brief Write an 8-bit value to a memory-mapped I/O register.
+ *
+ * Same `volatile`-access contract as #mmio_write, narrowed to a byte — for
+ * registers documented as 8-bit wide (e.g. SDHCI's Host Control 1, Power
+ * Control, Block Gap Control, Wakeup Control, Timeout Control, and Software
+ * Reset registers), so each can be addressed and accessed independently
+ * instead of masked/shifted out of a wider read.
+ *
+ * @param reg  Physical address of the MMIO register.
+ * @param data 8-bit value to store.
+ */
+static inline void mmio_write8(uint64_t reg, uint8_t data)
+{
+	*reinterpret_cast<volatile uint8_t*>(reg) = data;
+}
+
+/**
+ * @brief Read an 8-bit value from a memory-mapped I/O register.
+ *
+ * @param reg Physical address of the MMIO register.
+ * @return The current 8-bit value at @p reg.
+ */
+static inline uint8_t mmio_read8(uint64_t reg)
+{
+	return *reinterpret_cast<volatile uint8_t*>(reg);
 }
 
 /**

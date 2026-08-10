@@ -39,6 +39,19 @@ uint64_t get_time();
 /** @brief Return the latched timer frequency (Hz). Set by #timer_init. */
 uint64_t get_freq();
 
+/** @brief Delays the execution of a method until a certain amount of milliseconds has elapsed.*/
+void delay_ms(uint64_t N);
+
+/** @brief Read the raw hardware tick count (CNTPCT_EL0). Free-running,
+ *  independent of timer_init()/the software 10Hz tick — the same counter
+ *  #delay_ms is built on. Pair with #ticks_elapsed_ms to bound a polling
+ *  loop by wall-clock time instead of a fixed sleep. */
+uint64_t get_ticks();
+
+/** @brief True once at least `ms` milliseconds have elapsed since
+ *  `start_ticks` (a value previously returned by #get_ticks). */
+bool ticks_elapsed_ms(uint64_t start_ticks, uint64_t ms);
+
 /** @brief Emit `"Uptime: <ticks>"` over UART, preceded by a carriage return. */
 void print_time();
 

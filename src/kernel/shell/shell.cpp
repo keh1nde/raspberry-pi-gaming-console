@@ -32,6 +32,7 @@
 #include "kernel/pmm.h"
 #include "kernel/heap_alloc.h"
 #include "kernel/dma.h"
+#include "lib/fatfs/ff.h"
 
 /** Maximum command line length, in bytes. */
 #define MAX_LINE 256
@@ -183,6 +184,8 @@ static void cmd_help() {
     uart_puts("  write <file> <text>    write text to file\r\n");
     uart_puts("  cat <file>             print file contents\r\n");
     uart_puts("  rm <name>              remove file or empty directory\r\n");
+    uart_puts("  sdls [path]            list directory on SD card\r\n");
+    uart_puts("  sdcat <file>           print file contents from SD card\r\n");
     uart_puts("  clear                  clear the screen\r\n");
     uart_puts("  kernel                 show kernel info\r\n");
     uart_puts("  uptime                 print the uptime of the kernel\r\n");
@@ -272,6 +275,48 @@ static void cmd_touch(int argc, char** argv) {
     if (fs_create(cwd_ino, argv[1], 1) == INVALID_INO) {
         uart_puts("touch: failed (name exists or invalid)\r\n");
     }
+}
+
+/** @brief `sdls [path]` — list a directory on the mounted SD/FatFs volume.
+ *  Independent of `ls`/`cwd_ino` — FatFs tracks its own current directory
+ *  separately from ramfs's, so this always takes an absolute-from-root
+ *  FatFs path (defaulting to `/`), not the shell's `cwd_path`. */
+static void cmd_sdls(int argc, char** argv) {
+    const char* path = (argc < 2) ? "/" : argv[1];
+
+    DIR dir;
+    if (f_opendir(&dir, path) != FR_OK) { uart_puts("sdls: not found\r\n"); return; }
+
+    FILINFO info;
+    bool any = false;
+    while (f_readdir(&dir, &info) == FR_OK && info.fname[0] != '\0') {
+        uart_puts(info.fname);
+        if (info.fattrib & AM_DIR) uart_puts("/");
+        uart_puts("\r\n");
+        any = true;
+    }
+    f_closedir(&dir);
+    if (!any) uart_puts("(empty)\r\n");
+}
+
+/** @brief `sdcat <file>` — stream a file's contents from the SD/FatFs
+ *  volume to UART. Same relationship to `cat` as `sdls` has to `ls`. */
+static void cmd_sdcat(int argc, char** argv) {
+    if (argc < 2) { uart_puts("sdcat: missing file\r\n"); return; }
+
+    FIL fil;
+    if (f_open(&fil, argv[1], FA_READ) != FR_OK) { uart_puts("sdcat: not found\r\n"); return; }
+
+    char buf[128];
+    UINT br;
+    FRESULT res;
+    while ((res = f_read(&fil, buf, sizeof(buf) - 1, &br)) == FR_OK && br > 0) {
+        buf[br] = '\0';
+        uart_puts(buf);
+    }
+    f_close(&fil);
+    if (res != FR_OK) uart_puts("sdcat: read error\r\n");
+    else uart_puts("\r\n");
 }
 
 /** @brief `cat <file>` — stream the file's contents to UART. */
@@ -397,6 +442,8 @@ void shell_run() {
         else if (seq(argv[0], "cat"))    cmd_cat(argc, argv);
         else if (seq(argv[0], "write"))  cmd_write(argc, argv);
         else if (seq(argv[0], "rm"))     cmd_rm(argc, argv);
+        else if (seq(argv[0], "sdls"))   cmd_sdls(argc, argv);
+        else if (seq(argv[0], "sdcat"))  cmd_sdcat(argc, argv);
         else if (seq(argv[0], "clear"))    cmd_clear();
         else if (seq(argv[0], "kernel"))   print_banner();
         else if (seq(argv[0], "shutdown")) cmd_shutdown();

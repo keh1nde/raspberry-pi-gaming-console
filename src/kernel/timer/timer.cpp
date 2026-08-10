@@ -57,6 +57,32 @@ uint64_t get_freq() {
 	return freq;
 }
 
+
+void delay_ms(uint64_t N) {
+	uint64_t init_count;
+	asm volatile("mrs %0, CNTFRQ_EL0" : "=r"(init_count));
+	uint64_t target_ticks = (init_count / 1000) * N;
+
+	uint64_t d_time;
+	asm volatile("mrs %0, CNTPCT_EL0" : "=r"(d_time));
+	while ((d_time - init_count) <= target_ticks) { // NOLINT
+		asm volatile("mrs %0, CNTPCT_EL0" : "=r"(d_time));
+	}
+}
+
+uint64_t get_ticks() {
+	uint64_t ticks;
+	asm volatile("mrs %0, CNTPCT_EL0" : "=r"(ticks));
+	return ticks;
+}
+
+bool ticks_elapsed_ms(uint64_t start_ticks, uint64_t ms) {
+	uint64_t freq;
+	asm volatile("mrs %0, CNTFRQ_EL0" : "=r"(freq));
+	uint64_t target_ticks = (freq / 1000) * ms;
+	return (get_ticks() - start_ticks) >= target_ticks;
+}
+
 void print_time() {
 	uart_puts("\rUptime: ");
 	uart_put_uint(get_time());

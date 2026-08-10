@@ -402,14 +402,14 @@ dirent* dirent_at(const inode *dir, const uint64_t idx) {
 
 void append_block(inode* inode) {
 	if (!inode->first_block) {
-		inode->first_block = static_cast<block *>(kmalloc(BLOCK_SIZE));
+		inode->first_block = static_cast<block *>(kmalloc(FILE_BLOCK_SIZE));
 		return;
 	}
 	block_t* curr_block = inode->first_block;
 	while (curr_block->next) {
 		curr_block = curr_block->next;
 	}
-	curr_block->next = static_cast<block *>(kmalloc(BLOCK_SIZE));
+	curr_block->next = static_cast<block *>(kmalloc(FILE_BLOCK_SIZE));
 }
 
 bool name_copy(const char* path, uint64_t start, uint64_t end, const char* name) {
