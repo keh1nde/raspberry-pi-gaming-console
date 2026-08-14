@@ -4,18 +4,15 @@
  *  and write logic for BCM2712's native SDHCI controller, the one actually
  *  wired to this board's physical microSD card slot.
  *
- * This driver originally targeted RP1's own SDIO0 block, which is real,
- * spec-compliant silicon but — as discovered via a persistent "CMD line
- * conflict" signature on every command, including CMD0 — simply isn't
- * connected to the card slot on this board at all. See
- * p-docs/claude-notes/bcm2712-sdhci-migration-notes.md for the full story
- * and sources; the protocol-level logic below (command issuance, Present
- * State polling, interrupt status handling) is unchanged from that
- * RP1-targeted, hardware-verified-up-to-CMD8 version — only the register
- * base and a small BCM2712-specific bring-up sequence (pinctrl pull-ups,
- * the vendor "cfg" register) are new.
+ * For specific information about this implementation, including the
+ * sequence used, see the below reference from Section 3: Sequences, onwards.
+ *
+ * References:
+ * - SD Specifications Part A2: SD Host Controller Simplified Specification
+ *   version 4.20
  *
  * Part of raspberry-pi-gaming-console, a retro gaming console OS.
+ * Note that some docstrings are written by Claude for reference purposes.
  *
  * @author Kehinde Adeoso
  * @copyright 2026 Kehinde Adeoso. SPDX-License-Identifier: GPL-3.0-only
@@ -43,21 +40,21 @@ uint16_t rca = 0;
 /** Card Type. 0 == SDSC card; 1 == SDHC/SDXC card */
 uint32_t ccs = 0;
 
-/** Card Detect (PRESENT_STATE_SDIO0 bit 16), latched by _sdio_clock_init()
- *  each time it runs. Purely a hardware presence signal — distinct from
- *  "identification succeeded" (see ccs/cid/rca) — kept as its own global
- *  so a future disk_status()/error path can report "no card" separately
- *  from "card present but not initialized" without re-reading the
- *  register. 0 == Card not inserted; 1 == Card inserted */
+/** Card Detect (PRESENT_STATE_SDIO0, bit 16), latched by _sdio_clock_init().
+ * Signals if a card is currently inserted. Largely used by FatFS module.
+ * 0 == Card not inserted; 1 == Card inserted
+ */
 uint32_t card_inserted = 0;
 
 /**
- * @brief Waits for Clock Control's Internal Clock Stable bit (bit 1) to
+ * @brief Allow time for clock to stabilize.
+ *
+ *  Waits for Clock Control's Internal Clock Stable bit (bit 1) to
  *  assert, per the 150ms timeout the Host Controller spec itself defines
- *  for this wait (§3.2.3, Figure 3-5 step (5)) — not an arbitrary bound.
- *  Needed twice during clock setup (Figure 3-3: once after Internal
- *  Clock Enable, again after PLL Enable on Version 4.10+ controllers),
- *  hence its own helper.
+ *  for this wait (§3.2.3, Figure 3-5 step (5)).
+ *
+ *  Used during clock setup (see Host Controller Specification
+ *  Figure 3-3).
  *
  * @return true once stable; false (after logging the live register
  *  value) if 150ms elapses first.
@@ -80,16 +77,9 @@ bool _sdio_wait_clock_stable() {
  * @brief One-time BCM2712-specific bring-up: enables internal pull-ups on
  *  EMMC_CMD/DAT0-3 via BCM2712's own pinctrl block.
  *
- * A real prerequisite, not polish: without a pull-up, the CMD line has no
- * defined idle-high state and can float/sag low the instant nothing is
- * actively driving it — the leading hypothesis for the spec-documented
- * "CMD line conflict" signature (Host Controller spec §2.2.18: driving
- * high but reading back low) hit on every command while this driver was
- * still targeting RP1's SDIO0, whose own pins have entirely separate pull
- * config. See board.h's PINCTRL_EMMC_PULL_REG comment and
- * p-docs/claude-notes/bcm2712-sdhci-migration-notes.md for the full
- * per-pin bit-offset derivation. Read-modify-write, since EMMC_CLK/
- * EMMC_DS share this register and must be left alone.
+ * Pull-up required as the CMD line has no defined idle-high state and can float/sag low
+ * if inactive, which could cause the documented "CMD Line conflict" signature
+ * (See Host Controller spec §2.2.18) which occurred earlier in development
  */
 void _sdio_pinctrl_init() {
  uint32_t pull_reg = mmio_read(PINCTRL_EMMC_PULL_REG);
@@ -121,25 +111,12 @@ void _sdio_cfg_select_sd_pin_timing() {
  * @brief Clock initialization helper for sdio_init().
  *
  * Helper that initializes the clock during SDIO initialization.
- * It is used in sdio_init() to allow a retry in the event of a
- * CMD8 response failure.
+ * It is used in sdio_init() for first setup, and to allow a retry in
+ * the event of a CMD8 response failure.
  *
  * @return True if the clock is successfully initialized. False otherwise.
  */
 bool _sdio_clock_init() {
- // Software Reset For All — spec-mandated first step of Host Controller
- // initialization (§2.2.17, Table 2-23: "During its initialization, the
- // Host Driver shall set this bit to 1 to reset the Host Controller.").
- // Safe to run before card detection: the spec explicitly excludes the
- // card detection circuit from this reset's effect. Software Reset is an
- // 8-bit register (0x02F) sharing Timeout Control's 4-byte-aligned word;
- // the bit is RWAC (self-clearing) — the Host Controller clears it once
- // the reset completes and the Capabilities registers are valid again.
- // Without this, every register this driver touches starts from whatever
- // state the Pi 5's own boot firmware left the controller in after using
- // this exact SDIO block to load kernel8.img off the boot partition —
- // not the clean power-on-reset state the rest of this init sequence
- // assumes.
  mmio_write8(SOFTWARE_RESET_SDIO0, 1U); // Software Reset For All.
 
  const uint64_t reset_start = get_ticks();
@@ -151,12 +128,7 @@ bool _sdio_clock_init() {
   }
  }
 
- // One-time BCM2712-specific bring-up: internal pull-ups on EMMC_CMD/
- // DAT0-3 (pinctrl) and SD-vs-eMMC pin timing select ("cfg" register) —
- // see _sdio_pinctrl_init()/_sdio_cfg_select_sd_pin_timing()'s docstrings.
- // Neither has anything to do with card detection or the SDHCI IP itself,
- // so both can safely run before card detection, same as the RP1
- // clock-generator bring-up they replace used to.
+ // TODO: Remove the following forward declarations if not required.
  _sdio_pinctrl_init();
  _sdio_cfg_select_sd_pin_timing();
 
@@ -171,18 +143,13 @@ bool _sdio_clock_init() {
  // Read capabilities register for SD card details.
  const uint32_t capabilities = mmio_read(CAPABILITIES1_SDIO0);
 
- // Turn on SD Bus Power before anything else touches the bus — per Host
- // Controller spec §3.3 (Figure 3-6, "SD Bus Power Control Sequence"),
- // this is its own distinct procedure, separate from card detection and
- // clock setup. Table 1-10 explains why skipping it produces exactly a
- // silent hang rather than an error: SDCLK is held low whenever SD Bus
- // Power is 0, *regardless* of SD Clock Enable/Internal Clock Stable —
- // so the internal oscillator can lock just fine while the bus itself
- // never sees a clock edge, and every command silently never gets
- // clocked out. 3.3V (bits [3:1] = 111b) matches the 2.7-3.6V window
- // this driver's ACMD41 calls already assume; Power Control is an
- // 8-bit register (§2.2.12), not 16 or 32.
- mmio_write8(POWER_CONTROL_SDIO0, 0x0F); // SD Bus Voltage Select = 3.3V, SD Bus Power = 1.
+
+ // Turn on SD Bus Power. Required by Host Controller Spec Section 3.3 & Figure 3-6.
+ // SDCLK is held low whenever SD Bus Power is 0, resulting in silent errors.
+ // See Host Controller Spec, Table 1-10.
+ // SD Bus Voltage Select = 3.3V (bits [3:1] = 111b), SD Bus Power = 1.
+ // TODO: See Table 1-10.
+ mmio_write8(POWER_CONTROL_SDIO0, 0x0F);
 
  // Unmask every Normal/Error Interrupt Status bit so the Normal/Error
  // Interrupt Status registers actually latch events at all. Per Host
@@ -198,6 +165,9 @@ bool _sdio_clock_init() {
  // Command Complete, Transfer Complete, and every error bit are all
  // gated by this same enable, so a real error would hang exactly like a
  // silent success instead of being reported.
+
+ // Unmask all Normal/Error Interrupt Status bits so Normal/Error
+ // Interrupt Status registers can latch events.
  mmio_write16(NORMAL_INTERRUPT_STATUS_ENABLE_SDIO0, 0xFFFF);
  mmio_write16(ERROR_INTERRUPT_STATUS_ENABLE_SDIO0, 0xFFFF);
 
@@ -215,17 +185,11 @@ bool _sdio_clock_init() {
   uart_puts("[SDIO] warning: BCF may not be supported,"
             " or sdio_init implementation is incorrect.");
 
- // BCM2712's native SDHCI controller is fed by clk_emmc2, a plain fixed
- // 200MHz clock (bcm2712.dtsi) — unlike RP1's own SDIO0/SDIO1, which
- // always report 0 here due to an explicit SDHCI_QUIRK_CAP_CLOCK_BASE_
- // BROKEN pdata quirk declared only against RP1's variant in Linux's
- // sdhci-of-dwcmshc.c. sdhci-brcmstb.c declares no equivalent quirk for
- // BCM2712, so Capabilities should self-report 200 correctly in practice.
- // This fallback is kept anyway — both because the spec itself
- // anticipates a Base Clock Frequency of 0 (§3.6, Figure 3-3, step (1):
- // "the Host System shall provide this information... by another
- // method") and because which path this controller actually takes
- // hasn't yet been confirmed on real hardware.
+
+ // BCM2712's native SDHCI controller is fed by clk_emmc2, a 200MHz clock
+ // according to bcm2712.dtsi. While the Capabililties register should report
+ // 200 anyway, this fallback is kept to align with the Host Controller's
+ // expectation that a Base Clock Frequency of 0 can be reported.
  if (base_clock_mhz == 0) {
   uart_puts("[SDIO] Base Clock Frequency read as 0; using BCM2712's known"
             " fixed 200MHz clk_emmc2 clock.\r\n");
@@ -820,7 +784,7 @@ bool _sdio_acmd41_poll(uint32_t ocr_argument, uint32_t* response_out) {
 }
 
 bool _sdio_voltage_switch(const uint32_t s18a) {
- // Signal Voltage Switch is handled via a different procedure
+ // If true, Signal Voltage Switch is handled via a different procedure
  if (s18a == 0) return true;
 
  SDCommandStatus response = _send_command(SDCommand::CMD11,
@@ -1002,7 +966,9 @@ void _sdio_report_data_error(const char* who, SDCommandStatus status) {
 }
 
 /**
- * @brief Inspects an R1 Card Status word (CMD17/18/24/25's response) for
+ * @brief Checks and prints card error message, if applicable.
+ *
+ *  Inspects an R1 Card Status word (CMD17/18/24/25's response) for
  *  card-level rejections that a Success from _send_data_command() can't
  *  see — the bus transaction can complete cleanly while the card itself
  *  refuses it (address past the end of the card, write-protected media,

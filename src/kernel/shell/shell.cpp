@@ -1,24 +1,20 @@
 /**
  * @file shell.cpp
- * @brief Interactive UART shell sitting directly on the ramfs API.
+ * @brief Interactive UART shell sitting directly on the FatFs API.
  *
  * Part of kehinde-kernel: a bare-metal AArch64 operating system for the
  * Raspberry Pi 3 Model B (Cortex-A53) and Pi 5 (Cortex-A76).
  *
  * Read-parse-dispatch loop: print a prompt, read a line over UART, split
  * on whitespace, look the verb up in a small static table of handlers.
- * No fd table or open-handle layer — commands invoke `fs_*` functions
- * directly with inode numbers.
- *
- * State is two file-static fields:
- *   - `cwd_ino` — inode number of the current directory (used for FS ops).
- *   - `cwd_path` — string form of the cwd (used for `pwd` display and
- *     resolving relative paths).
+ * No fd table or open-handle layer — commands invoke `f_*` functions
+ * directly; FatFs (`FF_FS_RPATH == 2`) owns cwd tracking and relative/
+ * `.`/`..` path resolution internally, so the shell carries no path-
+ * resolution state of its own.
  *
  * Limitations:
- *   - `cd ..` is unsupported (inodes carry no parent pointer). Use an
- *     absolute path to back out.
- *   - `write` always starts at offset 0 (overwrite). No append mode.
+ *   - `write` always starts at offset 0 (overwrite). No append mode, and
+ *     a write shorter than the existing file does not truncate it.
  *   - No quoting; arguments are split on plain spaces.
  *
  * @author Kehinde Adeoso
@@ -26,7 +22,6 @@
  */
 
 #include "kernel/shell.h"
-#include "kernel/filesystem.h"
 #include "kernel/uart.h"
 #include "kernel/timer.h"
 #include "kernel/pmm.h"
@@ -43,12 +38,6 @@
 /** Maximum length of a path string the shell will construct internally. */
 #define MAX_PATH 512
 
-/** Inode of the current working directory. */
-static uint64_t cwd_ino = ROOT_INO;
-
-/** String form of the cwd. Updated by #cmd_cd. */
-static char cwd_path[MAX_PATH] = "/";
-
 // ====== String helpers (no libc) ======
 
 /** @brief Length of null-terminated @p s. */
@@ -56,13 +45,6 @@ static uint64_t slen(const char* s) {
     uint64_t n = 0;
     while (s[n]) n++;
     return n;
-}
-
-/** @brief Copy null-terminated @p src into @p dst including the terminator. */
-static void scpy(char* dst, const char* src) {
-    uint64_t i = 0;
-    while (src[i]) { dst[i] = src[i]; i++; }
-    dst[i] = '\0';
 }
 
 /** @brief Equality test for two null-terminated strings. */
@@ -143,26 +125,6 @@ static int parse_args(char* line, char** argv, int max_argc) {
     return argc;
 }
 
-// ====== Path resolution ======
-
-/**
- * @brief Resolve @p arg (absolute or single-component relative) to an inode.
- *
- * Absolute paths go straight to #fs_lookup. Bare names are prefixed with
- * `cwd_path + "/"` and then looked up. Does NOT handle `..` or `.`.
- *
- * @return Inode number, or #INVALID_INO if the path doesn't resolve.
- */
-static uint64_t resolve_path(const char* arg) {
-    if (arg[0] == '/') return fs_lookup(arg);
-    char full[MAX_PATH];
-    uint64_t clen = slen(cwd_path);
-    scpy(full, cwd_path);
-    if (cwd_path[clen - 1] != '/') { full[clen] = '/'; full[clen + 1] = '\0'; clen++; }
-    scpy(full + clen, arg);
-    return fs_lookup(full);
-}
-
 // ====== Commands ======
 
 /** @brief Print the kernel banner used by `kernel` and at shell start-up. */
@@ -184,8 +146,6 @@ static void cmd_help() {
     uart_puts("  write <file> <text>    write text to file\r\n");
     uart_puts("  cat <file>             print file contents\r\n");
     uart_puts("  rm <name>              remove file or empty directory\r\n");
-    uart_puts("  sdls [path]            list directory on SD card\r\n");
-    uart_puts("  sdcat <file>           print file contents from SD card\r\n");
     uart_puts("  clear                  clear the screen\r\n");
     uart_puts("  kernel                 show kernel info\r\n");
     uart_puts("  uptime                 print the uptime of the kernel\r\n");
@@ -208,84 +168,19 @@ static void cmd_shutdown() {
 
 /** @brief `pwd` — print the current working directory. */
 static void cmd_pwd() {
-    uart_puts(cwd_path);
+    char cwd[MAX_PATH];
+    if (f_getcwd(cwd, sizeof(cwd)) != FR_OK) { uart_puts("pwd: failed\r\n"); return; }
+    uart_puts(cwd);
     uart_puts("\r\n");
 }
 
-/** @brief `ls [path]` — list a directory; append `/` to subdirectory entries. */
+/** @brief `ls [path]` — list a directory; append `/` to subdirectory entries.
+ *  Defaults to the cwd (FatFs resolves `"."` internally). */
 static void cmd_ls(int argc, char** argv) {
-    uint64_t dir_ino;
-    if (argc < 2) {
-        dir_ino = cwd_ino;
-    } else {
-        dir_ino = resolve_path(argv[1]);
-        if (dir_ino == INVALID_INO) { uart_puts("ls: not found\r\n"); return; }
-    }
-
-    dirent ent;
-    uint64_t i = 0;
-    bool any = false;
-    while (fs_readdir(dir_ino, i, &ent) == 1) {
-        uart_puts(ent.name);
-        uint8_t type = 0;
-        fs_stat(ent.inode_id, nullptr, &type);
-        if (type == 2) uart_puts("/");
-        uart_puts("\r\n");
-        i++;
-        any = true;
-    }
-    if (!any) uart_puts("(empty)\r\n");
-}
-
-/** @brief `cd <path>` — change the cwd. Refuses non-directories. */
-static void cmd_cd(int argc, char** argv) {
-    if (argc < 2) { uart_puts("cd: missing path\r\n"); return; }
-    const char* target = argv[1];
-
-    uint64_t new_ino = resolve_path(target);
-    if (new_ino == INVALID_INO) { uart_puts("cd: not found\r\n"); return; }
-
-    uint8_t type = 0;
-    fs_stat(new_ino, nullptr, &type);
-    if (type != 2) { uart_puts("cd: not a directory\r\n"); return; }
-
-    cwd_ino = new_ino;
-    if (target[0] == '/') {
-        scpy(cwd_path, target);
-    } else {
-        uint64_t clen = slen(cwd_path);
-        if (cwd_path[clen - 1] != '/') { cwd_path[clen] = '/'; cwd_path[clen + 1] = '\0'; clen++; }
-        scpy(cwd_path + clen, target);
-    }
-}
-
-/** @brief `mkdir <name>` — create a directory in the cwd. */
-static void cmd_mkdir(int argc, char** argv) {
-    if (argc < 2) { uart_puts("mkdir: missing name\r\n"); return; }
-    if (argv[1][0] == '/') { uart_puts("mkdir: use relative names\r\n"); return; }
-    if (fs_create(cwd_ino, argv[1], 2) == INVALID_INO) {
-        uart_puts("mkdir: failed (name exists or invalid)\r\n");
-    }
-}
-
-/** @brief `touch <name>` — create an empty file in the cwd. */
-static void cmd_touch(int argc, char** argv) {
-    if (argc < 2) { uart_puts("touch: missing name\r\n"); return; }
-    if (argv[1][0] == '/') { uart_puts("touch: use relative names\r\n"); return; }
-    if (fs_create(cwd_ino, argv[1], 1) == INVALID_INO) {
-        uart_puts("touch: failed (name exists or invalid)\r\n");
-    }
-}
-
-/** @brief `sdls [path]` — list a directory on the mounted SD/FatFs volume.
- *  Independent of `ls`/`cwd_ino` — FatFs tracks its own current directory
- *  separately from ramfs's, so this always takes an absolute-from-root
- *  FatFs path (defaulting to `/`), not the shell's `cwd_path`. */
-static void cmd_sdls(int argc, char** argv) {
-    const char* path = (argc < 2) ? "/" : argv[1];
+    const char* path = (argc < 2) ? "." : argv[1];
 
     DIR dir;
-    if (f_opendir(&dir, path) != FR_OK) { uart_puts("sdls: not found\r\n"); return; }
+    if (f_opendir(&dir, path) != FR_OK) { uart_puts("ls: not found\r\n"); return; }
 
     FILINFO info;
     bool any = false;
@@ -299,13 +194,38 @@ static void cmd_sdls(int argc, char** argv) {
     if (!any) uart_puts("(empty)\r\n");
 }
 
-/** @brief `sdcat <file>` — stream a file's contents from the SD/FatFs
- *  volume to UART. Same relationship to `cat` as `sdls` has to `ls`. */
-static void cmd_sdcat(int argc, char** argv) {
-    if (argc < 2) { uart_puts("sdcat: missing file\r\n"); return; }
+/** @brief `cd <path>` — change the cwd. FatFs (FF_FS_RPATH == 2) tracks
+ *  the cwd itself, including `.`/`..` resolution. */
+static void cmd_cd(int argc, char** argv) {
+    if (argc < 2) { uart_puts("cd: missing path\r\n"); return; }
+    if (f_chdir(argv[1]) != FR_OK) { uart_puts("cd: not found or not a directory\r\n"); return; }
+}
+
+/** @brief `mkdir <name>` — create a directory. */
+static void cmd_mkdir(int argc, char** argv) {
+    if (argc < 2) { uart_puts("mkdir: missing name\r\n"); return; }
+    if (f_mkdir(argv[1]) != FR_OK) {
+        uart_puts("mkdir: failed (name exists or invalid)\r\n");
+    }
+}
+
+/** @brief `touch <name>` — create an empty file. Fails if it already exists. */
+static void cmd_touch(int argc, char** argv) {
+    if (argc < 2) { uart_puts("touch: missing name\r\n"); return; }
+    FIL fil;
+    if (f_open(&fil, argv[1], FA_WRITE | FA_CREATE_NEW) != FR_OK) {
+        uart_puts("touch: failed (name exists or invalid)\r\n");
+        return;
+    }
+    f_close(&fil);
+}
+
+/** @brief `cat <file>` — stream the file's contents to UART. */
+static void cmd_cat(int argc, char** argv) {
+    if (argc < 2) { uart_puts("cat: missing file\r\n"); return; }
 
     FIL fil;
-    if (f_open(&fil, argv[1], FA_READ) != FR_OK) { uart_puts("sdcat: not found\r\n"); return; }
+    if (f_open(&fil, argv[1], FA_READ) != FR_OK) { uart_puts("cat: not found\r\n"); return; }
 
     char buf[128];
     UINT br;
@@ -315,45 +235,31 @@ static void cmd_sdcat(int argc, char** argv) {
         uart_puts(buf);
     }
     f_close(&fil);
-    if (res != FR_OK) uart_puts("sdcat: read error\r\n");
+    if (res != FR_OK) uart_puts("cat: read error\r\n");
     else uart_puts("\r\n");
 }
 
-/** @brief `cat <file>` — stream the file's contents to UART. */
-static void cmd_cat(int argc, char** argv) {
-    if (argc < 2) { uart_puts("cat: missing file\r\n"); return; }
-    uint64_t ino = resolve_path(argv[1]);
-    if (ino == INVALID_INO) { uart_puts("cat: not found\r\n"); return; }
-
-    char buf[128];
-    int64_t n;
-    uint64_t offset = 0;
-    while ((n = fs_read(ino, offset, sizeof(buf) - 1, buf)) > 0) {
-        buf[n] = '\0';
-        uart_puts(buf);
-        offset += (uint64_t)n;
-    }
-    if (n < 0) uart_puts("cat: read error\r\n");
-    else uart_puts("\r\n");
-}
-
-/** @brief `write <file> <text...>` — overwrite the file with the joined text. */
+/** @brief `write <file> <text...>` — overwrite the file with the joined text,
+ *  starting at offset 0. The file must already exist (see `touch`). */
 static void cmd_write(int argc, char** argv) {
     if (argc < 3) { uart_puts("write: usage: write <file> <text>\r\n"); return; }
-    uint64_t ino = resolve_path(argv[1]);
-    if (ino == INVALID_INO) { uart_puts("write: not found\r\n"); return; }
+
+    FIL fil;
+    if (f_open(&fil, argv[1], FA_WRITE) != FR_OK) { uart_puts("write: not found\r\n"); return; }
 
     char text[MAX_LINE];
     join_args(text, argv, 2, argc);
-    uint64_t len = slen(text);
-    if (fs_write(ino, 0, len, text) < 0) uart_puts("write: failed\r\n");
+    UINT len = static_cast<UINT>(slen(text));
+    UINT written = 0;
+    const FRESULT res = f_write(&fil, text, len, &written);
+    f_close(&fil);
+    if (res != FR_OK || written != len) uart_puts("write: failed\r\n");
 }
 
-/** @brief `rm <name>` — unlink a file or empty directory in the cwd. */
+/** @brief `rm <name>` — unlink a file or empty directory. */
 static void cmd_rm(int argc, char** argv) {
     if (argc < 2) { uart_puts("rm: missing name\r\n"); return; }
-    if (argv[1][0] == '/') { uart_puts("rm: use relative names\r\n"); return; }
-    if (fs_unlink(cwd_ino, argv[1]) < 0) {
+    if (f_unlink(argv[1]) != FR_OK) {
         uart_puts("rm: failed (not found or non-empty directory)\r\n");
     }
 }
@@ -425,7 +331,8 @@ void shell_run() {
     print_banner();
 
     while (1) {
-        uart_puts(cwd_path);
+        char cwd[MAX_PATH];
+        if (f_getcwd(cwd, sizeof(cwd)) == FR_OK) uart_puts(cwd);
         uart_puts("$ ");
 
         if (read_line(line, MAX_LINE) == 0) continue;
@@ -442,8 +349,6 @@ void shell_run() {
         else if (seq(argv[0], "cat"))    cmd_cat(argc, argv);
         else if (seq(argv[0], "write"))  cmd_write(argc, argv);
         else if (seq(argv[0], "rm"))     cmd_rm(argc, argv);
-        else if (seq(argv[0], "sdls"))   cmd_sdls(argc, argv);
-        else if (seq(argv[0], "sdcat"))  cmd_sdcat(argc, argv);
         else if (seq(argv[0], "clear"))    cmd_clear();
         else if (seq(argv[0], "kernel"))   print_banner();
         else if (seq(argv[0], "shutdown")) cmd_shutdown();

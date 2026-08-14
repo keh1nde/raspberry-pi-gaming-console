@@ -14,14 +14,12 @@
  *   1. `mmu_init` (which internally runs `pmm_init`) — switches the kernel
  *      onto virtual addressing.
  *   2. `kheap_init` — depends on the MMU for lazy mapping.
- *   3. `fs_init` — depends on the heap.
- *   4. `f_mount` the SD/FatFs volume, then `sd_selftest` — independent of
- *      ramfs (`fs_init`), just grouped here as the other "storage" step.
- *      Mount failure is non-fatal: boots on into the shell either way, so
- *      a card-less/hardware-bringup boot still reaches a working prompt.
- *   5. `interrupt_init` — programs the IRQ controller; vector table is
+ *   3. `f_mount` the SD/FatFs volume, then `sd_selftest`. Mount failure is
+ *      non-fatal: boots on into the shell either way, so a card-less/
+ *      hardware-bringup boot still reaches a working prompt.
+ *   4. `interrupt_init` — programs the IRQ controller; vector table is
  *      already in place via boot.S.
- *   6. `shell_run` — does not return.
+ *   5. `shell_run` — does not return.
  *
  * The timer is intentionally not started here: its IRQ handler emits an
  * uptime message that would interleave with the shell prompt. Re-enable
@@ -42,7 +40,6 @@
 #include "kernel/mmu.h"
 #include "kernel/pmm.h"
 #include "kernel/timer.h"
-#include "kernel/filesystem.h"
 #include "kernel/shell.h"
 #include "kernel/spinlock.h"
 #include "kernel/crt.h"
@@ -143,9 +140,6 @@ extern "C" void kernel_main(uint32_t r0, uint32_t r1, uint32_t atags)
 
 	kheap_init();
 	uart_puts("Heap allocator initialized.\r\n");
-
-	fs_init();
-	uart_puts("fs_init done.\r\n");
 
 	if (f_mount(&sd_fs, "", 1) == FR_OK) {
 		uart_puts("SD card mounted.\r\n");
