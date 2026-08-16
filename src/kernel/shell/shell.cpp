@@ -150,6 +150,7 @@ static void cmd_help() {
     uart_puts("  kernel                 show kernel info\r\n");
     uart_puts("  uptime                 print the uptime of the kernel\r\n");
     uart_puts("  meminfo                print PMM/heap capacity-planning figures\r\n");
+    uart_puts("  crash                  trigger a deliberate BRK exception (panic handler test)\r\n");
     uart_puts("  shutdown               halt the system\r\n");
     uart_puts("  help                   show this message\r\n");
 }
@@ -321,6 +322,25 @@ static void cmd_meminfo() {
     uart_puts(" ("); put_mib(DMA_MAX_SIZE); uart_puts(")\r\n");
 }
 
+// ====== Panic handler test ======
+
+/**
+ * @brief `crash` — deliberately trigger a BRK exception through a known
+ * 3-deep call chain (level_a -> level_b -> level_c), for testing the
+ * synchronous-exception handler's GPR dump and backtrace against a known-
+ * good expected trace (resolve the printed addresses with
+ * `aarch64-elf-addr2line -e kernel8.elf` and check they land in level_c,
+ * level_b, level_a, in that order). Dev-only diagnostic; never returns.
+ */
+static void level_c() { asm volatile("brk #0"); }
+static void level_b() { level_c(); }
+static void level_a() { level_b(); }
+
+static void cmd_crash() {
+    uart_puts("Triggering deliberate BRK via level_a -> level_b -> level_c...\r\n");
+    level_a();
+}
+
 // ====== Shell entry point ======
 
 void shell_run() {
@@ -354,6 +374,7 @@ void shell_run() {
         else if (seq(argv[0], "shutdown")) cmd_shutdown();
         else if (seq(argv[0], "uptime")) cmd_timer();
         else if (seq(argv[0], "meminfo")) cmd_meminfo();
+        else if (seq(argv[0], "crash"))   cmd_crash();
         else {
             uart_puts(argv[0]);
             uart_puts(": command not found\r\n");

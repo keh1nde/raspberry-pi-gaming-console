@@ -77,7 +77,7 @@ extern "C" void interrupt_init() {
 	mmio_write(GICC_CTLR, 1);
 }
 
-extern "C" void handle_synchronous_interrupts(uint64_t* frame) {
+extern "C" [[noreturn]] void handle_synchronous_interrupts(uint64_t* frame) {
 	// Snapshot the exception-state registers up front so any subsequent
 	// UART activity does not perturb FAR_EL1 / ELR_EL1.
 	uint64_t esr;
@@ -104,105 +104,83 @@ extern "C" void handle_synchronous_interrupts(uint64_t* frame) {
 	switch (ec) {
 		case 0x20:
 			uart_puts("Instruction Abort from a lower EL.\r\n");
-			uart_puts("ESR_EL1: ");
-			uart_put_hex(esr);
-			uart_puts("\r\n");
-			uart_puts("ELR_EL1: ");
-			uart_put_hex(elr);
-			uart_puts("\r\n");
-			uart_puts("LR (x30): ");
-			uart_put_hex(lr);
-			uart_puts("\r\n");
-			uart_puts("FAR_EL1: ");
-			uart_put_hex(far);
-			uart_puts("\r\n");
-			uart_puts("\nDFSC: ");
-			uart_put_hex(dfsc);
-			uart_puts("\r\n");
-			while (true) {}
+			break;
 		case 0x21:
 			uart_puts("Instruction Abort from the same EL.\r\n");
 			uart_puts("There is likely no VA to PA mapping, or you did it wrong.\r\n");
-			uart_puts("ESR_EL1: ");
-			uart_put_hex(esr);
-			uart_puts("\r\n");
-			uart_puts("ELR_EL1: ");
-			uart_put_hex(elr);
-			uart_puts("\r\n");
-			uart_puts("LR (x30): ");
-			uart_put_hex(lr);
-			uart_puts("\r\n");
-			uart_puts("FAR_EL1: ");
-			uart_put_hex(far);
-			uart_puts("\r\n");
-			uart_puts("\nDFSC: ");
-			uart_put_hex(dfsc);
-			uart_puts("\r\n");
-			uart_put_hex(far);
-			uart_puts("\r\n");
-			while (true) {}
+			break;
 		case 0x24:
 			uart_puts("Data Abort from a lower EL \r\n");
-			uart_puts("ESR_EL1: ");
-			uart_put_hex(esr);
-			uart_puts("\r\n");
-			uart_puts("ELR_EL1: ");
-			uart_put_hex(elr);
-			uart_puts("\r\n");
-			uart_puts("LR (x30): ");
-			uart_put_hex(lr);
-			uart_puts("\r\n");
-			uart_puts("FAR_EL1: ");
-			uart_put_hex(far);
-			uart_puts("\r\n");
-			uart_puts("\nDFSC: ");
-			uart_put_hex(dfsc);
-			uart_puts("\r\n");
-			uart_put_hex(far);
-			uart_puts("\r\n");
-			while (true) {}
+			break;
 		case 0x25:
 			uart_puts("Data Abort from the same EL \r\n");
 			uart_puts("Kernel did a load/store to an unmapped or wrong-perm VA.\r\n");
-			uart_puts("ESR_EL1: ");
-			uart_put_hex(esr);
-			uart_puts("\r\n");
-			uart_puts("ELR_EL1: ");
-			uart_put_hex(elr);
-			uart_puts("\r\n");
-			uart_puts("LR (x30): ");
-			uart_put_hex(lr);
-			uart_puts("\r\n");
-			uart_puts("FAR_EL1: ");
-			uart_put_hex(far);
-			uart_puts("\r\n");
-			uart_puts("\nDFSC: ");
-			uart_put_hex(dfsc);
-			uart_puts("\r\n");
-			while (true) {}
+			break;
 		case 0x0E:
 			uart_puts("Illegal execution state \n");
-			uart_puts("ESR_EL1: ");
-			uart_put_hex(esr);
-			uart_puts("\r\n");
-			uart_puts("ELR_EL1: ");
-			uart_put_hex(elr);
-			uart_puts("\r\n");
-			uart_puts("LR (x30): ");
-			uart_put_hex(lr);
-			uart_puts("\r\n");
-			uart_puts("FAR_EL1: ");
-			uart_put_hex(far);
-			uart_puts("\r\n");
-			uart_puts("\nDFSC: ");
-			uart_put_hex(dfsc);
-			uart_puts("\r\n");
-			while (true) {}
+			break;
 		case 0x15:
 			uart_puts("SVC from AArch64: System call. \n");
 			break;
+		case 0x3C:
+			uart_puts("BRK instruction (debug breakpoint).\r\n");
+			break;
 		default:
 			handle_unexpected(ec, far, elr);
+	}
+
+	uart_puts("ESR_EL1: ");
+	uart_put_hex(esr);
+	uart_puts("\r\n");
+
+	uart_puts("ELR_EL1: ");
+	uart_put_hex(elr);
+	uart_puts("\r\n");
+
+	uart_puts("LR (x30): ");
+	uart_put_hex(lr);
+	uart_puts("\r\n");
+
+	uart_puts("FAR_EL1: ");
+	uart_put_hex(far);
+	uart_puts("\r\n");
+
+	uart_puts("DFSC: ");
+	uart_put_hex(dfsc);
+	uart_puts("\r\n");
+
+	uart_puts("Full GPR Dump: \r\n");
+	for (int i = 0; i < 30; i++) {
+		uart_puts("x");
+		uart_put_uint(i);
+		uart_puts(": ");
+		uart_put_hex(frame[i]);
+		uart_puts("\r\n");
+	}
+
+	// Frame-pointer backtrace: x29 heads a linked list of 16-byte frame
+	// records, each [fp+0] = caller's saved x29 (next node), [fp+8] =
+	// caller's saved x30/LR (this frame's return address) — see AAPCS64.
+	// fp == 0 is a real, deliberate terminator (boot.S zeroes x29 before
+	// entering kernel_main/secondary_main), not just an empty-chain guess.
+	// The alignment check catches a corrupted chain (AAPCS64 requires SP,
+	// and therefore x29, 16-byte aligned); the depth cap is the real
+	// backstop, since this project has no stack-region bounds to range-
+	// check fp against.
+
+	//
+	uart_puts("Backtrace:\r\n");
+	uint64_t fp = frame[29];
+	constexpr int MAX_BACKTRACE_DEPTH = 32;
+	for (int depth = 0; fp != 0 && (fp & 0xF) == 0 && depth < MAX_BACKTRACE_DEPTH; depth++) {
+		uint64_t ret_addr = *reinterpret_cast<uint64_t *>(fp + 8);
+		uart_put_hex(ret_addr);
+		uart_puts("\r\n");
+		fp = *reinterpret_cast<uint64_t *>(fp);
+	}
+
+	for (;;) {
+		asm volatile("wfi");
 	}
 }
 

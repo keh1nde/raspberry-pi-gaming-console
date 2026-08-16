@@ -129,6 +129,9 @@ el1_entry:
     // Unmask IRQs (DAIF I-bit).
     msr     DAIFClr, #2
 
+    // Set fp = 0 so backtrace knows where to stop
+    mov x29, #0
+
     // Hand off to the C++ kernel entry.
     bl      kernel_main
 
@@ -155,6 +158,9 @@ psci_cpu_on:
 secondary_entry:
     // Set up Stack Pointer
     mov sp, x0
+
+    // Set fp = 0 so backtrace knows where to stop, same as el1_entry.
+    mov x29, #0
 
     // CPACR_EL1.FPEN = 0b11: grant EL0/EL1 access to Advanced SIMD/FP.
     // Per-core register — must be set here too, not just in el1_entry.

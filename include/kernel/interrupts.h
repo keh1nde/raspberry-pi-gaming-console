@@ -24,10 +24,11 @@
  * @brief Synchronous-exception dispatcher.
  *
  * Called from the `sync_handler` stub in the vector table after general
- * register state has been saved. Decodes ESR_EL1 (EC, ISS, DFSC) and
- * dumps FAR_EL1 / ELR_EL1 / the saved x30 (LR) over UART before halting.
- * Intended as a panic/diagnostic path; does not return for fault-class
- * exceptions.
+ * register state has been saved. Decodes ESR_EL1 (EC, ISS, DFSC), dumps
+ * FAR_EL1 / ELR_EL1 / the full GPR file over UART, walks a frame-pointer
+ * backtrace, then halts. Every exception class handled here is treated as
+ * fatal, including SVC (0x15) — there is no syscall dispatch yet, so this
+ * currently never returns to the faulting context.
  *
  * @param frame Base of the 272-byte register-save frame `sync_handler`
  *  wrote to the stack (see vector_table.S's `save_registers` layout) —
@@ -35,7 +36,7 @@
  *  address into whatever function called the one that faulted, since
  *  ELR_EL1 alone only identifies the faulting instruction itself.
  */
-extern "C" void handle_synchronous_interrupts(uint64_t* frame);
+extern "C" [[noreturn]] void handle_synchronous_interrupts(uint64_t* frame);
 
 /**
  * @brief IRQ dispatcher.
