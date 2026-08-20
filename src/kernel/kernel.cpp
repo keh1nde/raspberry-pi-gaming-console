@@ -34,6 +34,7 @@
 #include <stdint.h>
 #include <string.h>
 
+#include "display/display.h"
 #include "kernel/heap_alloc.h"
 #include "kernel/uart.h"
 #include "kernel/interrupts.h"
@@ -161,6 +162,9 @@ extern "C" void kernel_main(uint32_t r0, uint32_t r1, uint32_t atags)
 			stack_top
 			);
 	}
+
+	display_init();
+	get_resolution();
 
 	shell_run();
 }

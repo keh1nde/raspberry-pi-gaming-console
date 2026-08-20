@@ -704,3 +704,101 @@ constexpr uint64_t HOST_CONTROLLER_VERSION_SDIO1 = SDIO1_BASE + HOST_CONTROLLER_
  *  rp1.dtsi ("sdio_clk0@b0004" / "sdio_clk1@b4004"). */
 constexpr uint64_t RP1_SDIO0_CLKGEN_BASE = PERIPHERAL_BASE + (0x400b0004 - 0x40000000);
 constexpr uint64_t RP1_SDIO1_CLKGEN_BASE = PERIPHERAL_BASE + (0x400b4004 - 0x40000000);
+
+/*
+ * Mailbox (VideoCore property interface) MMIO Addresses and Offsets
+ *
+ * Contains MMIO addresses for BCM2712's ARM<->VideoCore mailbox controller,
+ * the transport this kernel uses to reach VideoCore's firmware property
+ * interface (framebuffer setup, clock queries, etc. — see the mailbox
+ * driver once it exists for the actual request/response logic). Retrieved
+ * from:
+ *  - The official property-interface protocol docs at
+ *    github.com/raspberrypi/firmware wiki ("Mailbox property interface",
+ *    "Accessing mailboxes").
+ *  - The retail Pi 5 board files from Linux, specifically
+ *    arch/arm64/boot/dts/broadcom/bcm2712.dtsi (the mailbox node's `reg`)
+ *    and drivers/mailbox/bcm2835-mailbox.c (register offsets/bitmasks).
+ */
+
+/**
+ * MAILBOX_BASE — CPU physical 0x107c013880.
+ *
+ * BCM2712's mailbox register block (`mailbox@7c013880`,
+ * `compatible = "brcm,bcm2835-mbox"` in bcm2712.dtsi) — the same
+ * register-level IP as the original BCM2835's mailbox; the devicetree
+ * compatible string is *unchanged* from BCM2835, only the base address
+ * differs. Confirmed via mainline Linux's drivers/mailbox/bcm2835-mailbox.c,
+ * whose only devicetree match is "brcm,bcm2835-mbox" with no BCM2712-
+ * specific variant — so every register offset and bitmask below carries
+ * over as-is, unlike SDIO0_BASE where the controller itself changed.
+ *
+ * Address translation: bcm2712.dtsi's root simple-bus node declares
+ * `ranges = <0x0 0x10 0x0 0x80000000>`, so a child address X in
+ * [0, 0x80000000) maps to real physical 0x1000000000 + X. Applying that to
+ * the devicetree's `reg = <0x7c013880 0x40>` yields 0x107c013880 — the same
+ * derivation already hardware-confirmed for GICD_BASE and SDIO0_BASE (see
+ * their comments above), not a fresh, unverified formula.
+ */
+constexpr uint64_t MAILBOX_BASE = 0x107c013880;
+
+/** Mailbox register block size, per the devicetree `reg` tuple's second
+ *  cell (`<0x7c013880 0x40>`) — 64 bytes, covering every register below
+ *  plus reserved padding. */
+constexpr uint64_t MAILBOX_SIZE = 0x40;
+
+/**
+ * Mailbox 0 (VideoCore -> ARM) and mailbox 1 (ARM -> VideoCore) registers.
+ *
+ * The read/write asymmetry is deliberate, not an omission: only the
+ * direction each mailbox actually supports from the ARM side is defined
+ * here (reading MAIL1_RD or writing MAIL0_WRT are not meaningful
+ * operations for this driver). Source: drivers/mailbox/bcm2835-mailbox.c
+ * (mainline Linux) — offsets unchanged from the original BCM2835 mailbox
+ * IP (see MAILBOX_BASE above).
+ */
+constexpr uint64_t MAIL0_RD  = MAILBOX_BASE + 0x00; // VideoCore -> ARM: read the next response word.
+constexpr uint64_t MAIL0_STA = MAILBOX_BASE + 0x18; // VideoCore -> ARM: full/empty status.
+constexpr uint64_t MAIL1_WRT = MAILBOX_BASE + 0x20; // ARM -> VideoCore: write the next request word.
+constexpr uint64_t MAIL1_STA = MAILBOX_BASE + 0x38; // ARM -> VideoCore: full/empty status.
+
+/**
+ * Mailbox status register bits (read via MAIL0_STA / MAIL1_STA).
+ *
+ * Poll MAIL1_STA for `!ARM_MS_FULL` before writing MAIL1_WRT (the request
+ * FIFO must have room); poll MAIL0_STA for `!ARM_MS_EMPTY` before reading
+ * MAIL0_RD (a response must actually be waiting) — reading an empty
+ * mailbox does not block or error, it just returns stale/undefined data.
+ * Source: same as MAIL0_RD/MAIL1_WRT above.
+ */
+constexpr uint32_t ARM_MS_FULL  = (1U << 31);
+constexpr uint32_t ARM_MS_EMPTY = (1U << 30);
+
+/**
+ * Property-interface (channel 8) protocol constants.
+ *
+ * The low 4 bits of every value written to MAIL1_WRT or read from MAIL0_RD
+ * are a channel number, not part of the address — this is exactly why the
+ * request/response buffer must be 16-byte aligned, so those bits are free
+ * to encode the channel without clobbering the buffer's real address.
+ * Channel 8 ("request from ARM for response by VideoCore") is the
+ * property-tag channel this driver uses; channel 9 (VideoCore -> ARM,
+ * unsolicited) is unused here. Buffer header/response codes and the tag
+ * terminator are part of the same protocol.
+ * Source: github.com/raspberrypi/firmware wiki, "Mailbox property
+ * interface" / "Accessing mailboxes".
+ */
+constexpr uint32_t MBOX_CHANNEL_PROPERTY = 8;
+constexpr uint32_t MBOX_CHANNEL_MASK     = 0xF;
+
+constexpr uint32_t MBOX_REQUEST_CODE     = 0x00000000; // Buffer header: this is a request.
+constexpr uint32_t MBOX_RESPONSE_SUCCESS = 0x80000000; // Buffer header: VideoCore processed every tag.
+constexpr uint32_t MBOX_RESPONSE_ERROR   = 0x80000001; // Buffer header: VideoCore couldn't parse the buffer.
+constexpr uint32_t MBOX_TAG_LAST         = 0x00000000; // Terminates the tag list.
+
+/** "Get firmware revision" property tag — no request payload, one u32
+ *  response word (a VideoCore build identifier, not a semantic version).
+ *  The minimal tag used for the mailbox smoke test: proves the transport
+ *  (address, channel, buffer format) works before anything
+ *  framebuffer-specific is attempted. */
+constexpr uint32_t MBOX_TAG_GET_FIRMWARE_REVISION = 0x00000001;

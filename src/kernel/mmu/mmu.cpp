@@ -25,6 +25,9 @@
 #include "kernel/pmm.h"
 #include "kernel/uart.h"
 #include "kernel/mmu.h"
+
+#include "math.h"
+#include "display/display.h"
 #include "kernel/barrier.h"
 #include "kernel/board.h"
 #include "kernel/spinlock.h"
@@ -251,6 +254,18 @@ void mmu_init() {
 	map(phys_mem_start, phys_mem_start, PHYS_MEM_END - phys_mem_start, PTE_NORMAL_RW);
 	map(PERIPHERAL_BASE, PERIPHERAL_BASE, 0x410000, PTE_DEVICE_RW);
 	map(LOCAL_PERIPHERAL_BASE, LOCAL_PERIPHERAL_BASE, 0x8000, PTE_DEVICE_RW);
+
+	// MAILBOX_BASE (0x107c013880) is not page-aligned and MAILBOX_SIZE
+	// (0x40) is smaller than PAGE_SIZE, so map() must be given the
+	// containing page instead as its num_pages = size / PAGE_SIZE would
+	// otherwise truncate to 0 (a silent no-op). Even with size fixed,
+	// map() writes phys into the PTE unmasked, so a non-page-aligned phys
+	// would corrupt the descriptor's low-order attribute bits. The
+	// page-offset (0x880) still resolves correctly through translation
+	// once the containing page is mapped, so MAIL0_RD/MAIL1_WRT etc. keep
+	// using MAILBOX_BASE directly for register access.
+	constexpr uint64_t MAILBOX_PAGE_BASE = MAILBOX_BASE & ~0xFFFULL;
+	map(MAILBOX_PAGE_BASE, MAILBOX_PAGE_BASE, PAGE_SIZE, PTE_DEVICE_RW);
 
 	// SDIO0_BASE (0x1000fff000) is already page-aligned; one page covers
 	// both the "host" register window (0x000-0x260) and the "cfg" window

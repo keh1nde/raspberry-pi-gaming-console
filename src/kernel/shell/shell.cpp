@@ -27,7 +27,9 @@
 #include "kernel/pmm.h"
 #include "kernel/heap_alloc.h"
 #include "kernel/dma.h"
+#include "display/display.h"
 #include "lib/fatfs/ff.h"
+#include <stdlib.h>
 
 /** Maximum command line length, in bytes. */
 #define MAX_LINE 256
@@ -151,6 +153,12 @@ static void cmd_help() {
     uart_puts("  uptime                 print the uptime of the kernel\r\n");
     uart_puts("  meminfo                print PMM/heap capacity-planning figures\r\n");
     uart_puts("  crash                  trigger a deliberate BRK exception (panic handler test)\r\n");
+    uart_puts("  resolution             print the display's current physical resolution\r\n");
+    uart_puts("  setres <w> <h>         request a new physical/virtual resolution\r\n");
+    uart_puts("  pitch                  [temp] query pitch standalone, after setres\r\n");
+    uart_puts("  depth                  [temp] query depth standalone, after setres\r\n");
+    uart_puts("  fill <r> <g> <b>       fill the whole framebuffer with a color\r\n");
+    uart_puts("  hline <row>            draw a white test line across the given row\r\n");
     uart_puts("  shutdown               halt the system\r\n");
     uart_puts("  help                   show this message\r\n");
 }
@@ -341,6 +349,20 @@ static void cmd_crash() {
     level_a();
 }
 
+/** @brief `setres <width> <height>` — request a new display resolution. */
+static void cmd_setres(int argc, char** argv) {
+    if (argc < 3) { uart_puts("setres: usage: setres <width> <height>\r\n"); return; }
+
+    const int width = atoi(argv[1]);
+    const int height = atoi(argv[2]);
+    if (width <= 0 || height <= 0) {
+        uart_puts("setres: width and height must be positive integers\r\n");
+        return;
+    }
+
+    set_resolution(width, height);
+}
+
 // ====== Shell entry point ======
 
 void shell_run() {
@@ -375,6 +397,8 @@ void shell_run() {
         else if (seq(argv[0], "uptime")) cmd_timer();
         else if (seq(argv[0], "meminfo")) cmd_meminfo();
         else if (seq(argv[0], "crash"))   cmd_crash();
+        else if (seq(argv[0], "resolution")) get_resolution();
+        else if (seq(argv[0], "setres"))     cmd_setres(argc, argv);
         else {
             uart_puts(argv[0]);
             uart_puts(": command not found\r\n");
