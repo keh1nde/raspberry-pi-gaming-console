@@ -24,7 +24,7 @@
 
 #include "lib/fatfs/ff.h"
 #include "lib/fatfs/diskio.h"
-#include "kernel/sd.h"
+#include "sd/sd.h"
 
 #define DEV_SD 0
 
