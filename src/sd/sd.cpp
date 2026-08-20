@@ -18,7 +18,7 @@
  * @copyright 2026 Kehinde Adeoso. SPDX-License-Identifier: GPL-3.0-only
 */
 
-#include "kernel/sd.h"
+#include "sd/sd.h"
 #include "kernel/board.h"
 #include "kernel/uart.h"
 #include <stdint.h>
