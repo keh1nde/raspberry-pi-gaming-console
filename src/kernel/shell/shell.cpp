@@ -22,7 +22,7 @@
  */
 
 #include "kernel/shell.h"
-#include "kernel/uart.h"
+#include "kernel/io.h"
 #include "kernel/timer.h"
 #include "kernel/pmm.h"
 #include "kernel/heap_alloc.h"
@@ -155,8 +155,6 @@ static void cmd_help() {
     uart_puts("  crash                  trigger a deliberate BRK exception (panic handler test)\r\n");
     uart_puts("  resolution             print the display's current physical resolution\r\n");
     uart_puts("  setres <w> <h>         request a new physical/virtual resolution\r\n");
-    uart_puts("  pitch                  [temp] query pitch standalone, after setres\r\n");
-    uart_puts("  depth                  [temp] query depth standalone, after setres\r\n");
     uart_puts("  fill <r> <g> <b>       fill the whole framebuffer with a color\r\n");
     uart_puts("  hline <row>            draw a white test line across the given row\r\n");
     uart_puts("  shutdown               halt the system\r\n");
