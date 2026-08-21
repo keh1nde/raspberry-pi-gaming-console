@@ -20,7 +20,7 @@
 
 #include "sd/sd.h"
 #include "kernel/board.h"
-#include "kernel/uart.h"
+#include "kernel/io.h"
 #include <stdint.h>
 #include <math.h>
 #include "kernel/timer.h"

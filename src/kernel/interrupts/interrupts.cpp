@@ -37,7 +37,7 @@
 
 #include <stdint.h>
 
-#include "kernel/uart.h"
+#include "kernel/io.h"
 #include "kernel/timer.h"
 #include "kernel/board.h"
 

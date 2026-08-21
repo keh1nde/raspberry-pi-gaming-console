@@ -36,7 +36,7 @@
 
 #include "display/display.h"
 #include "kernel/heap_alloc.h"
-#include "kernel/uart.h"
+#include "kernel/io.h"
 #include "kernel/interrupts.h"
 #include "kernel/mmu.h"
 #include "kernel/pmm.h"

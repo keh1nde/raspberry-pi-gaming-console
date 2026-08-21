@@ -24,7 +24,7 @@
 
 #include "kernel/pmm.h"
 #include "kernel/mmu.h"
-#include "kernel/uart.h"
+#include "kernel/io.h"
 
 
 /** Virtual base address of the kernel heap (4 GiB mark). */

@@ -37,7 +37,7 @@
 #include "kernel/dma.h"
 #include "kernel/mmu.h"
 #include "kernel/pmm.h"
-#include "kernel/uart.h"
+#include "kernel/io.h"
 #include "display/render.h"
 
 

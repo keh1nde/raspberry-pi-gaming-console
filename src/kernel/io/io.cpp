@@ -1,5 +1,5 @@
 /**
- * @file uart.cpp
+ * @file io.cpp
  * @brief PL011 UART driver implementation.
  *
  * Part of raspberry-pi-gaming-console, a retro gaming console OS.
@@ -7,7 +7,7 @@
  *
  * Drives the BCM2835's PL011 UART at 115200 8N1 with FIFOs enabled. All
  * MMIO goes through the inline `mmio_read`/`mmio_write` helpers in
- * `<uart.h>`. Public API is documented in the header; this file documents
+ * `<io.h>`. Public API is documented in the header; this file documents
  * register-level behavior.
  *
  * References:
@@ -20,7 +20,7 @@
 
 #include <stddef.h>
 #include <stdint.h>
-#include "kernel/uart.h"
+#include "kernel/io.h"
 #include "kernel/board.h"
 #include "kernel/spinlock.h"
 

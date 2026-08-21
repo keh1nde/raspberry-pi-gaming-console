@@ -1,5 +1,5 @@
 /**
- * @file uart.h
+ * @file io.h
  * @brief PL011 UART driver — public API for serial I/O.
  *
  * Part of raspberry-pi-gaming-console, a retro gaming console OS.

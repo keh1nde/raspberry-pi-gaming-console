@@ -31,7 +31,7 @@
 #include "../../../include/kernel/pmm.h"
 #include "../../../include/kernel/spinlock.h"
 #include "../../../include/kernel/mmu.h"
-#include "../../../include/kernel/uart.h"
+#include "../../../include/kernel/io.h"
 
 static spinlock newlib_lock = {0};
 
