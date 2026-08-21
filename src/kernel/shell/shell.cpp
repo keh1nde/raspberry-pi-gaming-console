@@ -382,21 +382,21 @@ void shell_run() {
         int argc = parse_args(line, argv, MAX_ARGS);
         if (argc == 0) continue;
 
-        if      (seq(argv[0], "help"))   cmd_help();
-        else if (seq(argv[0], "ls"))     cmd_ls(argc, argv);
-        else if (seq(argv[0], "pwd"))    cmd_pwd();
-        else if (seq(argv[0], "cd"))     cmd_cd(argc, argv);
-        else if (seq(argv[0], "mkdir"))  cmd_mkdir(argc, argv);
-        else if (seq(argv[0], "touch"))  cmd_touch(argc, argv);
-        else if (seq(argv[0], "cat"))    cmd_cat(argc, argv);
-        else if (seq(argv[0], "write"))  cmd_write(argc, argv);
-        else if (seq(argv[0], "rm"))     cmd_rm(argc, argv);
-        else if (seq(argv[0], "clear"))    cmd_clear();
-        else if (seq(argv[0], "kernel"))   print_banner();
-        else if (seq(argv[0], "shutdown")) cmd_shutdown();
-        else if (seq(argv[0], "uptime")) cmd_timer();
-        else if (seq(argv[0], "meminfo")) cmd_meminfo();
-        else if (seq(argv[0], "crash"))   cmd_crash();
+        if      (seq(argv[0], "help"))       cmd_help();
+        else if (seq(argv[0], "ls"))         cmd_ls(argc, argv);
+        else if (seq(argv[0], "pwd"))        cmd_pwd();
+        else if (seq(argv[0], "cd"))         cmd_cd(argc, argv);
+        else if (seq(argv[0], "mkdir"))      cmd_mkdir(argc, argv);
+        else if (seq(argv[0], "touch"))      cmd_touch(argc, argv);
+        else if (seq(argv[0], "cat"))        cmd_cat(argc, argv);
+        else if (seq(argv[0], "write"))      cmd_write(argc, argv);
+        else if (seq(argv[0], "rm"))         cmd_rm(argc, argv);
+        else if (seq(argv[0], "clear"))      cmd_clear();
+        else if (seq(argv[0], "kernel"))     print_banner();
+        else if (seq(argv[0], "shutdown"))   cmd_shutdown();
+        else if (seq(argv[0], "uptime"))     cmd_timer();
+        else if (seq(argv[0], "meminfo"))    cmd_meminfo();
+        else if (seq(argv[0], "crash"))      cmd_crash();
         else if (seq(argv[0], "resolution")) get_resolution();
         else if (seq(argv[0], "setres"))     cmd_setres(argc, argv);
         else {
