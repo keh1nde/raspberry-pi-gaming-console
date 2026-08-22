@@ -326,6 +326,11 @@ void set_resolution(const int width, const int height) {
 	const uint64_t fb_aligned_size = fb_page_count * PAGE_SIZE;
 	map(framebuffer_base, framebuffer_base, fb_aligned_size, PTE_NORMAL_NC_RW);
 
+	// For the terminal, set terminal's maximum rows/cols
+	// based on the current resolution.
+	term_cols = framebuffer_width / 8;
+	term_rows = framebuffer_height / 8;
+
 	dma_free(buf, 152);
 }
 

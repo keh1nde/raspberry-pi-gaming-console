@@ -21,8 +21,12 @@
 #include <stddef.h>
 #include <stdint.h>
 #include "kernel/io.h"
+
+#include "string.h"
+#include "display/display.h"
 #include "kernel/board.h"
 #include "kernel/spinlock.h"
+#include "display/render.h"
 
 static spinlock uart_lock = {0};
 
@@ -153,4 +157,93 @@ void uart_put_uint(uint64_t val) {
 	for (size_t i = 0; i != counter; i++) {
 		print_helper(value_buffer[counter - i - 1]);
 	}
+}
+
+void _term_scroll() {
+	// logical buffer scroll
+	memmove(term_buffer, term_buffer + MAX_TERM_COLS, (term_rows - 1) * MAX_TERM_COLS);
+
+	// blank new bottom logical row
+	memset(term_buffer + (term_rows - 1) * MAX_TERM_COLS, ' ', term_cols);
+
+	// scroll framebuffer pixels
+	// one character-row is 8 scanlines tall
+	// each scanline is framebuffer_pitch bytes
+	memmove(reinterpret_cast<void*>(framebuffer_base),
+		reinterpret_cast<void*>(framebuffer_base + 8 * framebuffer_pitch),
+		(term_rows - 1) * 8 * framebuffer_pitch);
+
+	// memset fills by byte, so filling in a multibyte word could
+	// result in UB. Thus, loop each of the 8 scanlines and set
+	// the color manually.
+	for (uint32_t y = (term_rows-1)*8; y < (term_rows-1)*8 + 8; y++) {
+		draw_horizontal_line(y, background_color);
+	}
+}
+
+void term_clear() {
+	memset(term_buffer, ' ', MAX_TERM_ROWS * MAX_TERM_COLS);
+	fill_screen(background_color);
+	cursor_row = 0;
+	cursor_col = 0;
+
+	uart_term_clear();
+}
+
+void uart_term_clear() {
+	uart_puts("\033[2J\033[H");
+}
+
+void term_putc(char c) {
+	draw_char(cursor_col, cursor_row, ' ', text_color, background_color);
+
+	if (c == '\r' || c == '\n') {
+		cursor_row++;
+		cursor_col = 0;
+		if (cursor_row >= term_rows) {
+			_term_scroll();
+			cursor_row = term_rows - 1;
+		}
+
+		draw_char(cursor_col, cursor_row, ' ', background_color, text_color);
+		return;
+	}
+
+	if ((c == 127 || c == '\b') && cursor_col > 3) {
+		cursor_col--;
+		term_buffer[cursor_row * MAX_TERM_COLS + cursor_col] = ' ';
+
+		draw_char(cursor_col, cursor_row, ' ', background_color, text_color);
+		return;
+	}
+
+	term_buffer[cursor_row * MAX_TERM_COLS + cursor_col] = c;
+	draw_char(cursor_col, cursor_row, c, text_color, background_color);
+	cursor_col++;
+
+	if (cursor_col >= term_cols) {
+		cursor_col = 0;
+		cursor_row++;
+		if (cursor_row >= term_rows) {
+			_term_scroll();
+			cursor_row = term_rows - 1;
+		}
+	}
+
+	draw_char(cursor_col, cursor_row, ' ', background_color, text_color);
+}
+
+void term_puts(const char* str) {
+	for (size_t i = 0; str[i] != '\0'; i ++)
+		term_putc(str[i]);
+}
+
+void io_puts(const char *str) {
+	term_puts(str);
+	uart_puts(str);
+}
+
+void io_putc(char c) {
+	term_putc(c);
+	uart_putc(c);
 }

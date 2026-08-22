@@ -166,6 +166,8 @@ extern "C" void kernel_main(uint32_t r0, uint32_t r1, uint32_t atags)
 	display_init();
 	get_resolution();
 
+	set_resolution(1920, 1080);
+
 	shell_run();
 }
 

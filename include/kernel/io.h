@@ -192,3 +192,57 @@ void uart_put_uint(uint64_t val);
  * @param val Digit value in the range [0, 15].
  */
 void print_helper(uint64_t val);
+
+/**
+ * @brief Writes a char @p c to the screen.
+ *
+ * In addition to calling @p draw_char to write the character to
+ * the framebuffer, the character is also written to the terminal
+ * @p buffer
+ *
+ * @param c character to be displayed on screen.
+ */
+void term_putc(char c);
+
+/**
+ * @brief Transmit a null-terminated C string to screen.
+ *
+ * Calls #term_putc for each character up to (but not including) the
+ * terminating `'\0'`. No newline translation.
+ *
+ * @param str Null-terminated string. Must not be nullptr.
+ */
+void term_puts(const char* str);
+
+/**
+ * @brief Clears the terminal
+ *
+ * Clears the screen-side terminal via memset and fill_screen calls.
+ */
+void term_clear();
+
+/**
+ * @brief Clears the UART side terminal
+ */
+void uart_term_clear();
+
+/**
+ * @brief Unified puts method for UART and the screen-side terminal.
+ *
+ * Transmits a null-terminated C string over UART and to the screen.
+ *
+ * @param str Null-terminated string. Must not be nullptr.
+ */
+void io_puts(const char* str);
+
+/**
+ * @brief Unified putc method for UART and the screen-side terminal.
+ *
+ * Writes @p c to both #term_putc and #uart_putc. This is the primitive
+ * #_write (newlib's `printf`/`puts` syscall stub) is built on, so any
+ * libc output function reaches both mediums automatically once routed
+ * through here.
+ *
+ * @param c Character to transmit.
+ */
+void io_putc(char c);
