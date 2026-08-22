@@ -23,7 +23,7 @@
 #include <stdint.h>
 
 #include "kernel/pmm.h"
-#include "kernel/uart.h"
+#include "kernel/io.h"
 #include "kernel/mmu.h"
 
 #include "math.h"

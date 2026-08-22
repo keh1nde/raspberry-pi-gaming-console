@@ -19,7 +19,7 @@
 
 #include "kernel/timer.h"
 #include <stdint.h>
-#include "kernel/uart.h"
+#include "kernel/io.h"
 #include "kernel/spinlock.h"
 
 /** Tick counter; advanced by #increment_time from the IRQ. */

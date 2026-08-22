@@ -8,7 +8,7 @@
  * the specific barrier + domain combinations this kernel actually uses (no
  * `dmb` wrapper yet — every current call site needs the completion
  * guarantee only `dsb` gives, not just load/store ordering). `static
- * inline`, like the MMIO accessors in uart.h, so each translation unit
+ * inline`, like the MMIO accessors in io.h, so each translation unit
  * gets its own trivially-inlined copy with no link-time multiple-definition
  * risk.
  *

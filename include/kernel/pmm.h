@@ -24,7 +24,7 @@
 #define RASPBERRY_PI_OPERATING_SYSTEM_PMM_H
 
 #include <stdint.h>
-#include "kernel/uart.h"
+#include "kernel/io.h"
 #include "kernel/board.h"
 
 

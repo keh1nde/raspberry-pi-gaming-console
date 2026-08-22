@@ -31,7 +31,7 @@
 #include "../../../include/kernel/pmm.h"
 #include "../../../include/kernel/spinlock.h"
 #include "../../../include/kernel/mmu.h"
-#include "../../../include/kernel/uart.h"
+#include "../../../include/kernel/io.h"
 
 static spinlock newlib_lock = {0};
 
@@ -155,8 +155,10 @@ extern "C" void* _sbrk(ptrdiff_t incr) {
  * @brief Write @p nbyte bytes from @p buf to file descriptor @p fd.
  *
  * Only fd 1 (stdout) and 2 (stderr) have anywhere to go right now — route
- * both to `uart_puts`. Any other fd has no backing file yet (no VFS) —
- * return -1 with `errno = EBADF`.
+ * both through `io_putc`, which fans out to UART and the screen-side
+ * terminal. This is the reason `printf`/`puts` reach the screen mirror at
+ * all: newlib's stdio funnels every write through this stub. Any other fd
+ * has no backing file yet (no VFS) — return -1 with `errno = EBADF`.
  *
  * @param fd    Target file descriptor.
  * @param buf   Bytes to write.
@@ -166,9 +168,9 @@ extern "C" void* _sbrk(ptrdiff_t incr) {
 extern "C" int _write(int fd, const void* buf, size_t nbyte) {
 	if (fd == 1 || fd == 2) {
 		for (size_t i = 0; i < nbyte; i++) {
-			uart_putc(static_cast<const unsigned char*>(buf)[i]);
+			io_putc(static_cast<const unsigned char*>(buf)[i]);
 		}
-		return 0;
+		return static_cast<int>(nbyte);
 	}
 	errno = EBADF;
 	return -1;

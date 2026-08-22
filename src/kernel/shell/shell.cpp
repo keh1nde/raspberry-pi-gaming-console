@@ -12,6 +12,16 @@
  * `.`/`..` path resolution internally, so the shell carries no path-
  * resolution state of its own.
  *
+ * Every message goes through `printf` (newlib), which reaches both UART
+ * and the screen-side terminal via `_write` -> `io_putc` (see
+ * `libc_retarget.cpp`) — one function for every string transmitted, so a
+ * future change to how/where shell output goes (e.g. UART becoming
+ * debug-only once the screen renderer is trusted) is a change in one
+ * place, not a repo-wide audit of who calls what. Never pass a variable
+ * (file content, a filename, `argv`) directly as the format string —
+ * always `printf("%s", data)` — since data read from the filesystem or
+ * typed by a user may itself contain `%` sequences.
+ *
  * Limitations:
  *   - `write` always starts at offset 0 (overwrite). No append mode, and
  *     a write shorter than the existing file does not truncate it.
@@ -22,7 +32,7 @@
  */
 
 #include "kernel/shell.h"
-#include "kernel/uart.h"
+#include "kernel/io.h"
 #include "kernel/timer.h"
 #include "kernel/pmm.h"
 #include "kernel/heap_alloc.h"
@@ -30,6 +40,8 @@
 #include "display/display.h"
 #include "lib/fatfs/ff.h"
 #include <stdlib.h>
+#include <stdio.h>
+#include <inttypes.h>
 
 /** Maximum command line length, in bytes. */
 #define MAX_LINE 256
@@ -80,6 +92,10 @@ static void join_args(char* dst, char** argv, int start, int argc) {
  * with `\b \b` redraw), and printable ASCII (≥ 32) only. Other control
  * characters are silently discarded.
  *
+ * Per-keystroke echo (the `uart_putc` call below) is intentionally
+ * UART-only — mirroring live keystrokes to the screen is an input
+ * feature that belongs with USB HID, not this output-mirroring pass.
+ *
  * @param buf Destination buffer.
  * @param max Buffer capacity, including the null terminator.
  * @return Number of bytes stored in @p buf (excluding terminator).
@@ -89,17 +105,17 @@ static int read_line(char* buf, int max) {
     while (i < max - 1) {
         char c = uart_getc();
         if (c == '\r' || c == '\n') {
-            uart_puts("\r\n");
+            printf("\r\n");
             break;
         }
         if ((c == 127 || c == '\b') && i > 0) {
             i--;
-            uart_puts("\b \b");
+            printf("\b \b");
             continue;
         }
         if (c >= 32) {
             buf[i++] = c;
-            uart_putc(c);
+            io_putc(c);
         }
     }
     buf[i] = '\0';
@@ -131,46 +147,44 @@ static int parse_args(char* line, char** argv, int max_argc) {
 
 /** @brief Print the kernel banner used by `kernel` and at shell start-up. */
 static void print_banner() {
-    uart_puts("kehinde-kernel v1.1.1\r\n");
-    uart_puts("Authored by Kehinde Adeoso\r\n");
-    uart_puts("Finished May 13, 2026. Updated June 2, 2026\r\n");
-    uart_puts("Type 'help' for a list of commands.\r\n");
+    printf("kehinde-kernel v1.1.1\r\n");
+    printf("Authored by Kehinde Adeoso\r\n");
+    printf("Finished May 13, 2026. Updated June 2, 2026\r\n");
+    printf("Type 'help' for a list of commands.\r\n");
 }
 
 /** @brief `help` — list the available commands. */
 static void cmd_help() {
-    uart_puts("Commands:\r\n");
-    uart_puts("  ls [path]              list directory\r\n");
-    uart_puts("  pwd                    print working directory\r\n");
-    uart_puts("  cd <path>              change directory\r\n");
-    uart_puts("  mkdir <name>           create directory\r\n");
-    uart_puts("  touch <name>           create empty file\r\n");
-    uart_puts("  write <file> <text>    write text to file\r\n");
-    uart_puts("  cat <file>             print file contents\r\n");
-    uart_puts("  rm <name>              remove file or empty directory\r\n");
-    uart_puts("  clear                  clear the screen\r\n");
-    uart_puts("  kernel                 show kernel info\r\n");
-    uart_puts("  uptime                 print the uptime of the kernel\r\n");
-    uart_puts("  meminfo                print PMM/heap capacity-planning figures\r\n");
-    uart_puts("  crash                  trigger a deliberate BRK exception (panic handler test)\r\n");
-    uart_puts("  resolution             print the display's current physical resolution\r\n");
-    uart_puts("  setres <w> <h>         request a new physical/virtual resolution\r\n");
-    uart_puts("  pitch                  [temp] query pitch standalone, after setres\r\n");
-    uart_puts("  depth                  [temp] query depth standalone, after setres\r\n");
-    uart_puts("  fill <r> <g> <b>       fill the whole framebuffer with a color\r\n");
-    uart_puts("  hline <row>            draw a white test line across the given row\r\n");
-    uart_puts("  shutdown               halt the system\r\n");
-    uart_puts("  help                   show this message\r\n");
+    printf("Commands:\r\n");
+    printf("  ls [path]              list directory\r\n");
+    printf("  pwd                    print working directory\r\n");
+    printf("  cd <path>              change directory\r\n");
+    printf("  mkdir <name>           create directory\r\n");
+    printf("  touch <name>           create empty file\r\n");
+    printf("  write <file> <text>    write text to file\r\n");
+    printf("  cat <file>             print file contents\r\n");
+    printf("  rm <name>              remove file or empty directory\r\n");
+    printf("  clear                  clear the screen\r\n");
+    printf("  kernel                 show kernel info\r\n");
+    printf("  uptime                 print the uptime of the kernel\r\n");
+    printf("  meminfo                print PMM/heap capacity-planning figures\r\n");
+    printf("  crash                  trigger a deliberate BRK exception (panic handler test)\r\n");
+    printf("  resolution             print the display's current physical resolution\r\n");
+    printf("  setres <w> <h>         request a new physical/virtual resolution\r\n");
+    printf("  fill <r> <g> <b>       fill the whole framebuffer with a color\r\n");
+    printf("  hline <row>            draw a white test line across the given row\r\n");
+    printf("  shutdown               halt the system\r\n");
+    printf("  help                   show this message\r\n");
 }
 
-/** @brief `clear` — emit the ANSI "erase screen + cursor home" sequence. */
+/** @brief `clear` — clear both UART (ANSI escape) and the screen terminal. */
 static void cmd_clear() {
-    uart_puts("\033[2J\033[H");
+    term_clear();
 }
 
 /** @brief `shutdown` — mask all exceptions and park the core in `wfi`. */
 static void cmd_shutdown() {
-    uart_puts("Shutting down kehinde-kernel. Ciao!\r\n");
+    printf("Shutting down kehinde-kernel. Ciao!\r\n");
     asm volatile("msr daifset, #0xf");
     for (;;) asm volatile("wfi");
 }
@@ -178,9 +192,8 @@ static void cmd_shutdown() {
 /** @brief `pwd` — print the current working directory. */
 static void cmd_pwd() {
     char cwd[MAX_PATH];
-    if (f_getcwd(cwd, sizeof(cwd)) != FR_OK) { uart_puts("pwd: failed\r\n"); return; }
-    uart_puts(cwd);
-    uart_puts("\r\n");
+    if (f_getcwd(cwd, sizeof(cwd)) != FR_OK) { printf("pwd: failed\r\n"); return; }
+    printf("%s\r\n", cwd);
 }
 
 /** @brief `ls [path]` — list a directory; append `/` to subdirectory entries.
@@ -189,41 +202,39 @@ static void cmd_ls(int argc, char** argv) {
     const char* path = (argc < 2) ? "." : argv[1];
 
     DIR dir;
-    if (f_opendir(&dir, path) != FR_OK) { uart_puts("ls: not found\r\n"); return; }
+    if (f_opendir(&dir, path) != FR_OK) { printf("ls: not found\r\n"); return; }
 
     FILINFO info;
     bool any = false;
     while (f_readdir(&dir, &info) == FR_OK && info.fname[0] != '\0') {
-        uart_puts(info.fname);
-        if (info.fattrib & AM_DIR) uart_puts("/");
-        uart_puts("\r\n");
+        printf("%s%s\r\n", info.fname, (info.fattrib & AM_DIR) ? "/" : "");
         any = true;
     }
     f_closedir(&dir);
-    if (!any) uart_puts("(empty)\r\n");
+    if (!any) printf("(empty)\r\n");
 }
 
 /** @brief `cd <path>` — change the cwd. FatFs (FF_FS_RPATH == 2) tracks
  *  the cwd itself, including `.`/`..` resolution. */
 static void cmd_cd(int argc, char** argv) {
-    if (argc < 2) { uart_puts("cd: missing path\r\n"); return; }
-    if (f_chdir(argv[1]) != FR_OK) { uart_puts("cd: not found or not a directory\r\n"); return; }
+    if (argc < 2) { printf("cd: missing path\r\n"); return; }
+    if (f_chdir(argv[1]) != FR_OK) { printf("cd: not found or not a directory\r\n"); return; }
 }
 
 /** @brief `mkdir <name>` — create a directory. */
 static void cmd_mkdir(int argc, char** argv) {
-    if (argc < 2) { uart_puts("mkdir: missing name\r\n"); return; }
+    if (argc < 2) { printf("mkdir: missing name\r\n"); return; }
     if (f_mkdir(argv[1]) != FR_OK) {
-        uart_puts("mkdir: failed (name exists or invalid)\r\n");
+        printf("mkdir: failed (name exists or invalid)\r\n");
     }
 }
 
 /** @brief `touch <name>` — create an empty file. Fails if it already exists. */
 static void cmd_touch(int argc, char** argv) {
-    if (argc < 2) { uart_puts("touch: missing name\r\n"); return; }
+    if (argc < 2) { printf("touch: missing name\r\n"); return; }
     FIL fil;
     if (f_open(&fil, argv[1], FA_WRITE | FA_CREATE_NEW) != FR_OK) {
-        uart_puts("touch: failed (name exists or invalid)\r\n");
+        printf("touch: failed (name exists or invalid)\r\n");
         return;
     }
     f_close(&fil);
@@ -231,30 +242,30 @@ static void cmd_touch(int argc, char** argv) {
 
 /** @brief `cat <file>` — stream the file's contents to UART. */
 static void cmd_cat(int argc, char** argv) {
-    if (argc < 2) { uart_puts("cat: missing file\r\n"); return; }
+    if (argc < 2) { printf("cat: missing file\r\n"); return; }
 
     FIL fil;
-    if (f_open(&fil, argv[1], FA_READ) != FR_OK) { uart_puts("cat: not found\r\n"); return; }
+    if (f_open(&fil, argv[1], FA_READ) != FR_OK) { printf("cat: not found\r\n"); return; }
 
     char buf[128];
     UINT br;
     FRESULT res;
     while ((res = f_read(&fil, buf, sizeof(buf) - 1, &br)) == FR_OK && br > 0) {
         buf[br] = '\0';
-        uart_puts(buf);
+        printf("%s", buf);
     }
     f_close(&fil);
-    if (res != FR_OK) uart_puts("cat: read error\r\n");
-    else uart_puts("\r\n");
+    if (res != FR_OK) printf("cat: read error\r\n");
+    else printf("\r\n");
 }
 
 /** @brief `write <file> <text...>` — overwrite the file with the joined text,
  *  starting at offset 0. The file must already exist (see `touch`). */
 static void cmd_write(int argc, char** argv) {
-    if (argc < 3) { uart_puts("write: usage: write <file> <text>\r\n"); return; }
+    if (argc < 3) { printf("write: usage: write <file> <text>\r\n"); return; }
 
     FIL fil;
-    if (f_open(&fil, argv[1], FA_WRITE) != FR_OK) { uart_puts("write: not found\r\n"); return; }
+    if (f_open(&fil, argv[1], FA_WRITE) != FR_OK) { printf("write: not found\r\n"); return; }
 
     char text[MAX_LINE];
     join_args(text, argv, 2, argc);
@@ -262,27 +273,26 @@ static void cmd_write(int argc, char** argv) {
     UINT written = 0;
     const FRESULT res = f_write(&fil, text, len, &written);
     f_close(&fil);
-    if (res != FR_OK || written != len) uart_puts("write: failed\r\n");
+    if (res != FR_OK || written != len) printf("write: failed\r\n");
 }
 
 /** @brief `rm <name>` — unlink a file or empty directory. */
 static void cmd_rm(int argc, char** argv) {
-    if (argc < 2) { uart_puts("rm: missing name\r\n"); return; }
+    if (argc < 2) { printf("rm: missing name\r\n"); return; }
     if (f_unlink(argv[1]) != FR_OK) {
-        uart_puts("rm: failed (not found or non-empty directory)\r\n");
+        printf("rm: failed (not found or non-empty directory)\r\n");
     }
 }
 
 /** @brief `uptime` — print the uptime of the kernel in seconds. */
 static void cmd_timer() {
     shell_print_time();
-    uart_puts("\n");
+    printf("\n");
 }
 
 /** @brief Print @p bytes rounded down to whole MiB, no fractional part. */
 static void put_mib(uint64_t bytes) {
-    uart_put_uint(bytes / (1024 * 1024));
-    uart_puts(" MiB");
+    printf("%" PRIu64 " MiB", bytes / (1024 * 1024));
 }
 
 /**
@@ -293,12 +303,18 @@ static void put_mib(uint64_t bytes) {
  * base/cap. Exists so sizing a new arena's `*_MAX_SIZE` (see
  * `sbrk-capacity-planning` writeup) doesn't require hand-deriving these
  * numbers via `nm` and the `pmm_init` bitmap math each time.
+ *
+ * Hex/decimal values are explicitly cast to `uint64_t` before being
+ * passed to `printf` — `%` PRIu64/PRIX64 `"` requires an exact-width
+ * argument, and several of these constants' declared types aren't
+ * pinned down at this call site, so the cast guarantees the vararg
+ * actually matches what the format specifier reads back.
  */
 static void cmd_meminfo() {
-    uart_puts("--- Physical memory (kernel/pmm.h, board.h) ---\r\n");
-    uart_puts("PHYS_MEM_END:    "); uart_put_hex(PHYS_MEM_END); uart_puts("\r\n");
-    uart_puts("phys_mem_start:  "); uart_put_hex(phys_mem_start); uart_puts("\r\n");
-    uart_puts("__kernel_end:    "); uart_put_hex(reinterpret_cast<uint64_t>(__kernel_end)); uart_puts("\r\n");
+    printf("--- Physical memory (kernel/pmm.h, board.h) ---\r\n");
+    printf("PHYS_MEM_END:    0x%" PRIX64 "\r\n", static_cast<uint64_t>(PHYS_MEM_END));
+    printf("phys_mem_start:  0x%" PRIX64 "\r\n", static_cast<uint64_t>(phys_mem_start));
+    printf("__kernel_end:    0x%" PRIX64 "\r\n", reinterpret_cast<uint64_t>(__kernel_end));
 
     // pmm_init marks the bits past total_frames in the bitmap's final word as
     // "used" so alloc_frame can't hand them out — subtract that padding back
@@ -310,24 +326,24 @@ static void cmd_meminfo() {
     const uint64_t used_frames = raw_set_bits - padding_bits;
     const uint64_t free_frames = total_frames - used_frames;
 
-    uart_puts("total_frames:    "); uart_put_uint(total_frames);
-    uart_puts(" ("); put_mib(total_frames * PAGE_SIZE); uart_puts(")\r\n");
-    uart_puts("used_frames:     "); uart_put_uint(used_frames);
-    uart_puts(" ("); put_mib(used_frames * PAGE_SIZE); uart_puts(")\r\n");
-    uart_puts("free_frames:     "); uart_put_uint(free_frames);
-    uart_puts(" ("); put_mib(free_frames * PAGE_SIZE); uart_puts(")\r\n");
+    printf("total_frames:    %" PRIu64 " (", total_frames);
+    put_mib(total_frames * PAGE_SIZE); printf(")\r\n");
+    printf("used_frames:     %" PRIu64 " (", used_frames);
+    put_mib(used_frames * PAGE_SIZE); printf(")\r\n");
+    printf("free_frames:     %" PRIu64 " (", free_frames);
+    put_mib(free_frames * PAGE_SIZE); printf(")\r\n");
 
-    uart_puts("--- kmalloc heap (kernel/heap_alloc.h) ---\r\n");
-    uart_puts("HEAP_BASE:       "); uart_put_hex(HEAP_BASE); uart_puts("\r\n");
-    uart_puts("HEAP_MAX_SIZE:   "); uart_put_hex(HEAP_MAX_SIZE);
-    uart_puts(" ("); put_mib(HEAP_MAX_SIZE); uart_puts(")\r\n");
-    uart_puts("bump_ptr:        "); uart_put_hex(bump_ptr); uart_puts("\r\n");
-    uart_puts("heap_end:        "); uart_put_hex(heap_end); uart_puts("\r\n");
+    printf("--- kmalloc heap (kernel/heap_alloc.h) ---\r\n");
+    printf("HEAP_BASE:       0x%" PRIX64 "\r\n", static_cast<uint64_t>(HEAP_BASE));
+    printf("HEAP_MAX_SIZE:   0x%" PRIX64 " (", static_cast<uint64_t>(HEAP_MAX_SIZE));
+    put_mib(HEAP_MAX_SIZE); printf(")\r\n");
+    printf("bump_ptr:        0x%" PRIX64 "\r\n", static_cast<uint64_t>(bump_ptr));
+    printf("heap_end:        0x%" PRIX64 "\r\n", static_cast<uint64_t>(heap_end));
 
-    uart_puts("--- DMA arena (kernel/dma.h) ---\r\n");
-    uart_puts("DMA_BASE:        "); uart_put_hex(DMA_BASE); uart_puts("\r\n");
-    uart_puts("DMA_MAX_SIZE:    "); uart_put_hex(DMA_MAX_SIZE);
-    uart_puts(" ("); put_mib(DMA_MAX_SIZE); uart_puts(")\r\n");
+    printf("--- DMA arena (kernel/dma.h) ---\r\n");
+    printf("DMA_BASE:        0x%" PRIX64 "\r\n", static_cast<uint64_t>(DMA_BASE));
+    printf("DMA_MAX_SIZE:    0x%" PRIX64 " (", static_cast<uint64_t>(DMA_MAX_SIZE));
+    put_mib(DMA_MAX_SIZE); printf(")\r\n");
 }
 
 // ====== Panic handler test ======
@@ -345,18 +361,18 @@ static void level_b() { level_c(); }
 static void level_a() { level_b(); }
 
 static void cmd_crash() {
-    uart_puts("Triggering deliberate BRK via level_a -> level_b -> level_c...\r\n");
+    printf("Triggering deliberate BRK via level_a -> level_b -> level_c...\r\n");
     level_a();
 }
 
 /** @brief `setres <width> <height>` — request a new display resolution. */
 static void cmd_setres(int argc, char** argv) {
-    if (argc < 3) { uart_puts("setres: usage: setres <width> <height>\r\n"); return; }
+    if (argc < 3) { printf("setres: usage: setres <width> <height>\r\n"); return; }
 
     const int width = atoi(argv[1]);
     const int height = atoi(argv[2]);
     if (width <= 0 || height <= 0) {
-        uart_puts("setres: width and height must be positive integers\r\n");
+        printf("setres: width and height must be positive integers\r\n");
         return;
     }
 
@@ -366,16 +382,18 @@ static void cmd_setres(int argc, char** argv) {
 // ====== Shell entry point ======
 
 void shell_run() {
+    setvbuf(stdout, NULL, _IONBF, 0);
+
     char line[MAX_LINE];
     char* argv[MAX_ARGS];
 
-    uart_puts("\r\n");
+    printf("\r\n");
     print_banner();
 
     while (1) {
         char cwd[MAX_PATH];
-        if (f_getcwd(cwd, sizeof(cwd)) == FR_OK) uart_puts(cwd);
-        uart_puts("$ ");
+        if (f_getcwd(cwd, sizeof(cwd)) == FR_OK) printf("%s", cwd);
+        printf("$ ");
 
         if (read_line(line, MAX_LINE) == 0) continue;
 
@@ -400,8 +418,7 @@ void shell_run() {
         else if (seq(argv[0], "resolution")) get_resolution();
         else if (seq(argv[0], "setres"))     cmd_setres(argc, argv);
         else {
-            uart_puts(argv[0]);
-            uart_puts(": command not found\r\n");
+            printf("%s: command not found\r\n", argv[0]);
         }
     }
 }
