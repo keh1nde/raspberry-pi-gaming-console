@@ -58,3 +58,13 @@ void spin_lock(spinlock& lk, uint64_t& flags);
  * @param flags DAIF state captured by the matching spin_lock call.
  */
 void spin_unlock(spinlock& lk, uint64_t flags);
+
+
+class SpinLockGuard {
+public:
+	explicit SpinLockGuard(spinlock& lk) : lk(lk), flags_(0) { spin_lock(lk, flags_); }
+	~SpinLockGuard() { spin_unlock(lk, flags_); }
+private:
+	spinlock& lk;
+	uint64_t flags_;
+};

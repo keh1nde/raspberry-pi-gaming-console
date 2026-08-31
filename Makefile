@@ -66,6 +66,27 @@ LIB_C_SRC   := $(shell find lib/src -name '*.c')
 # unqualified-include path.
 build/lib/fatfs/%.o: CFLAGS += -Ilib/include/lib/fatfs
 
+# Circle's own sources (lib/src/circle/) use their upstream-qualified
+# #include <circle/usb/foo.h> convention (headers vendored at
+# lib/include/lib/circle/usb/), which already matches our own
+# #include "lib/foo.h" shape one level up — so this only needs the include
+# root itself added, not a flat unqualified path like FatFs above. Scoped to
+# just this directory's objects for the same reason as the FatFs rule.
+#
+# -DRASPPI=5: real Circle's own build system always defines this (the
+# board generation its `#if RASPPI == N`-style conditionals switch on)
+# — leaving it undefined doesn't mean "no board", it means every check
+# silently evaluates as RASPPI==0. That's harmless for this port's earlier
+# `#if RASPPI == 4` guards (0== 4 and 5==4 both false, same outcome either
+# way), but genuinely wrong for the `#if RASPPI >= 4` / `<= 3` branches
+# found throughout usbdevice.cpp/usbendpoint.cpp/usbhostcontroller.cpp/
+# usbstandardhub.cpp and their headers once actually looked for — those
+# pick the old Pi 1-3 DWHCI-era code path instead of the xHCI-appropriate
+# one when undefined evaluates as 0. Discovered via a real "TUSBHubInfo
+# does not name a type" build error, not proactively — worth remembering
+# that a missing `#define` doesn't mean "off", it means "0".
+build/lib/circle/%.o: CXXFLAGS += -Ilib/include/lib -DRASPPI=5
+
 # Map source paths to object paths under build/ (mirrors the src/ and
 # lib/src/ trees).
 ASM_OBJ  = $(patsubst src/%.S, build/%.o, $(ASM_SRC)) \

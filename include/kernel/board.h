@@ -802,3 +802,36 @@ constexpr uint32_t MBOX_TAG_LAST         = 0x00000000; // Terminates the tag lis
  *  (address, channel, buffer format) works before anything
  *  framebuffer-specific is attempted. */
 constexpr uint32_t MBOX_TAG_GET_FIRMWARE_REVISION = 0x00000001;
+
+/*
+ * RP1 xHCI/DWC3 USB Host Controller MMIO Addresses
+ *
+ * RP1 has two independent Synopsys DWC3 controllers (`compatible =
+ * "snps,dwc3"` in rp1.dtsi), each running in host (xHCI) mode — the
+ * hardware Phase 3's USB HID work targets. **Derived from the devicetree,
+ * not yet hardware-confirmed** the way every other address in this file
+ * has been — verify against real register reads (e.g. HCIVERSION at
+ * XHCI0_BASE + 0x02, expected 0x110 per xhciconfig.h's non-RASPPI-4
+ * default) before trusting this for anything beyond bring-up.
+ *
+ * rp1.dtsi's `rp1_usb0`/`rp1_usb1` nodes: `reg = <0xc0 0x40200000 0x0
+ * 0x100000>` / `<0xc0 0x40300000 0x0 0x100000>` — the low 32 bits
+ * (0x40200000/0x40300000) match the exact `0x400xxxxx` shape this file's
+ * other RP1-internal peripherals use (IO_BANK0_BASE, PADS_BANK_BASE,
+ * SYS_RIO_BASE, the CLK_UART_* registers) — same
+ * `PERIPHERAL_BASE + (rp1_internal_offset - 0x40000000)` formula applies.
+ * The leading `0xc0` cell is consumed by an intermediate bus hop in RP1's
+ * own internal address-cells/ranges chain that this file's other
+ * RP1-internal entries don't spell out either (they're stated in already-
+ * hardware-confirmed final form) — not yet independently re-derived hop by
+ * hop for this specific address, hence the "not yet hardware-confirmed"
+ * flag above.
+ *
+ * Each window is 0x100000 (1 MiB) — comfortably covers the standard xHCI
+ * capability/operational/runtime/doorbell register spread plus DWC3's own
+ * "global" register block sitting before them (GCTL/PHY config — see the
+ * Circle-port project history for why RP1's controllers, being Synopsys
+ * DWC3 IP rather than bare xHCI silicon, need that extra block).
+ */
+constexpr uint64_t XHCI0_BASE = PERIPHERAL_BASE + (0x40200000 - 0x40000000);
+constexpr uint64_t XHCI1_BASE = PERIPHERAL_BASE + (0x40300000 - 0x40000000);

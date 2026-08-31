@@ -9,6 +9,7 @@
  */
 
 #include "kernel/crt.h"
+#include "stdlib.h"
 
 typedef void (*ctor_fn)();
 
@@ -22,3 +23,39 @@ extern "C" void crt_init() {
 		(*ctor)();
 	}
 }
+
+void* operator new(const size_t size){
+	void *ptr = (size == 0) ? malloc(1) : malloc(size);
+	return ptr;
+}
+
+void* operator new[](const size_t size) {
+	return operator new(size);
+}
+
+void operator delete(void* ptr) {
+	if (ptr) free(ptr);
+}
+
+void operator delete[](void* ptr) {
+	operator delete(ptr);
+}
+
+// Sized delete (C++14) — GCC calls this in preference to the unsized
+// overload above whenever it knows the deleted object's exact type at the
+// delete site, which is most places. The size itself isn't needed here;
+// free() already knows how much to release from malloc's own bookkeeping.
+void operator delete(void* ptr, size_t) {
+	operator delete(ptr);
+}
+
+void operator delete[](void* ptr, size_t) {
+	operator delete(ptr);
+}
+
+// Normally provided by libstdc++'s runtime for __cxa_atexit bookkeeping
+// (registering global-object destructors against the shared object they
+// belong to, for when it's unloaded). Meaningless here — this kernel never
+// unloads and, per crt.h's own comment, never calls destructors at all —
+// but the symbol still needs to exist for anything that references it.
+void* __dso_handle = nullptr;

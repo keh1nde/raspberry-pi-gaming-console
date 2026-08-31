@@ -24,4 +24,13 @@
  * that might touch a non-trivial global/static C++ object. Secondary cores
  * must NOT call this — constructors run once total, not once per core.
  */
+
+#include <stddef.h>
 extern "C" void crt_init();
+
+void* operator new(size_t size);
+void* operator new[](size_t size);
+void operator delete(void* ptr);
+void operator delete[](void* ptr);
+void operator delete(void* ptr, size_t size);
+void operator delete[](void* ptr, size_t size);
