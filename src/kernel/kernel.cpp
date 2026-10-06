@@ -44,6 +44,7 @@
 #include "kernel/shell.h"
 #include "kernel/spinlock.h"
 #include "kernel/crt.h"
+#include "kernel/usb.h"
 #include "lib/fatfs/ff.h"
 
 extern "C" int64_t psci_cpu_on(uint64_t mpidr, uint64_t entry, uint64_t context_id);
@@ -167,6 +168,8 @@ extern "C" void kernel_main(uint32_t r0, uint32_t r1, uint32_t atags)
 	get_resolution();
 
 	set_resolution(1920, 1080);
+
+	usb_init();
 
 	shell_run();
 }

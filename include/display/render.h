@@ -1,6 +1,21 @@
-//
-// Created by Kehinde Adeoso on 8/20/26.
-//
+/**
+ * @file render.h
+ * @brief Framebuffer pixel-write primitives and the shell's text/terminal
+ *        rendering state — see render.cpp.
+ *
+ * Part of raspberry-pi-gaming-console, a retro gaming console OS.
+ *
+ * `term_buffer` is sized for the maximum supported resolution
+ * (1920x1080 at 8x8 glyph cells: 240 cols x 135 rows), a fixed-capacity
+ * allocation the kernel heap's lack of `kfree` makes deliberate rather
+ * than dynamic. `MAX_TERM_ROWS`/`MAX_TERM_COLS` (that fixed stride) vs.
+ * `term_rows`/`term_cols` (the live, negotiated-resolution grid size) is a
+ * capacity-vs-active-usage split — the same shape as the physical memory
+ * manager's total frame count vs. its used-frame count.
+ *
+ * @author Kehinde Adeoso
+ * @copyright 2026 Kehinde Adeoso. SPDX-License-Identifier: GPL-3.0-only
+ */
 
 #pragma once
 

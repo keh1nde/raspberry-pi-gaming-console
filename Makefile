@@ -87,6 +87,13 @@ build/lib/fatfs/%.o: CFLAGS += -Ilib/include/lib/fatfs
 # that a missing `#define` doesn't mean "off", it means "0".
 build/lib/circle/%.o: CXXFLAGS += -Ilib/include/lib -DRASPPI=5
 
+# The kernel-side USB subsystem (src/kernel/usb/) is the one place outside
+# lib/src/circle/ itself that #includes <circle/...> headers directly (to
+# drive CXHCIDevice etc.) — same two flags needed for the same reasons as
+# the build/lib/circle/%.o rule above, just scoped to this directory
+# instead since these objects live under build/kernel/, not build/lib/.
+build/kernel/usb/%.o: CXXFLAGS += -Ilib/include/lib -DRASPPI=5
+
 # Map source paths to object paths under build/ (mirrors the src/ and
 # lib/src/ trees).
 ASM_OBJ  = $(patsubst src/%.S, build/%.o, $(ASM_SRC)) \

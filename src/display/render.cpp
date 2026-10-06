@@ -1,6 +1,23 @@
-//
-// Created by Kehinde Adeoso on 8/20/26.
-//
+/**
+ * @file render.cpp
+ * @brief Framebuffer pixel-write primitives and the shell's text/terminal
+ *        rendering (font data, glyph drawing).
+ *
+ * Part of raspberry-pi-gaming-console, a retro gaming console OS.
+ *
+ * Builds on the framebuffer display.cpp negotiates — #put_pixel and
+ * everything else here write directly into it, with no bounds checking
+ * against the current width/height (same trust contract as mmio_write;
+ * callers stay in range). #draw_char renders one glyph from
+ * #font8x8_basic (falling back to #font8x8_fallback for anything outside
+ * printable ASCII) into an 8x8 pixel cell addressed by terminal
+ * column/row, the building block the shell's scrolling terminal grid
+ * (state declared in render.h: term_buffer, cursor position, live vs.
+ * maximum grid size) is drawn through.
+ *
+ * @author Kehinde Adeoso
+ * @copyright 2026 Kehinde Adeoso. SPDX-License-Identifier: GPL-3.0-only
+ */
 
 #include <stdint.h>
 #include "display/display.h"
